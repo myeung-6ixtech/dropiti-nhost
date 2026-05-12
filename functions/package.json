@@ -1,0 +1,24 @@
+{
+  "name": "dropiti-nhost-functions",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "type": "commonjs",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^25.7.0",
+    "typescript": "^6.0.3"
+  }
+}
