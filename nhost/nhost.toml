@@ -12,6 +12,15 @@ adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
 type = 'HS256'
 key = '{{ secrets.HASURA_GRAPHQL_JWT_SECRET }}'
 
+# Required for cloud deploy: replaceConfig rejects null postgres (ConfigPostgresInsertInput).
+# Pin version to match Nhost-supported images; run `nhost config pull` if deploy rejects the tag.
+# https://github.com/nhost/nhost/blob/main/cli/examples/myproject/nhost/nhost.toml
+[postgres]
+version = '14.20-20251217-1'
+
+[postgres.resources.storage]
+capacity = 1
+
 # Required for cloud deploy: replaceConfig rejects null observability (ConfigObservabilityInsertInput).
 # https://github.com/nhost/nhost/blob/main/cli/examples/myproject/nhost/nhost.toml
 [observability]

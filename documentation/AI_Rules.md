@@ -186,8 +186,8 @@ Nhost secret naming is easy to get wrong. Use the shared env helper instead of s
   1. system-injected runtime vars,
   2. `[[global.environment]]` values in `nhost.toml`,
   3. secrets from Dashboard / repo-root `.secrets`.
-- Local secrets are loaded by the Nhost CLI from a **repo-root file** named `.secrets` (not under `functions/`). Committed templates live in the `secrets/` directory — copy `secrets/dotsecrets.example` to `.secrets` for local runs (see `secrets/README.md`).
-- The `.secrets` file must stay gitignored and uncommitted.
+- Local secrets live in the repo-root `.secrets` file, not under `functions/`.
+- `.secrets` must stay gitignored and uncommitted.
 - Missing required secrets should fail loudly at startup, not degrade silently.
 
 ---
