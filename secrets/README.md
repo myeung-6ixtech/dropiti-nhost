@@ -15,6 +15,7 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 
 - `HASURA_GRAPHQL_ADMIN_SECRET`
 - `HASURA_GRAPHQL_JWT_SECRET`
+- `GRAFANA_ADMIN_PASSWORD` (managed Grafana; referenced from `[observability.grafana]` in `nhost/nhost.toml` for cloud deploys)
 
 Optional for function routes that use `getAdminSecret()` in `_lib/env.ts`:
 

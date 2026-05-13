@@ -11,3 +11,9 @@ adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
 [[hasura.jwtSecrets]]
 type = 'HS256'
 key = '{{ secrets.HASURA_GRAPHQL_JWT_SECRET }}'
+
+# Required for cloud deploy: replaceConfig rejects null observability (ConfigObservabilityInsertInput).
+# https://github.com/nhost/nhost/blob/main/cli/examples/myproject/nhost/nhost.toml
+[observability]
+[observability.grafana]
+adminPassword = '{{ secrets.GRAFANA_ADMIN_PASSWORD }}'
