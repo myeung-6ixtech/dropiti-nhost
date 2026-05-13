@@ -1,11 +1,6 @@
-# Nhost CLI: real secrets at repo root (never commit)
+node_modules/
+dist/
+.env
+.env.local
 .secrets
-
-functions/node_modules/
-functions/dist/
-
-# Optional scratch next to committed templates in secrets/
-secrets/*.local
-secrets/local.secrets
-secrets/.env
-
+*.js.map
