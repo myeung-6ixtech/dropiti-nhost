@@ -24,6 +24,13 @@ export async function hasuraQuery<T>(
     body: JSON.stringify({ query, variables }),
   });
 
+  if (!response.ok) {
+    const text = await response.text();
+    return {
+      errors: [{ message: `Hasura HTTP ${response.status}: ${text.slice(0, 200)}` }],
+    };
+  }
+
   const json = (await response.json()) as HasuraResult<T>;
   return json;
 }

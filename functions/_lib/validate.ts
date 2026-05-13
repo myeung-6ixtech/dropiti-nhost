@@ -18,3 +18,6 @@ export function validateBody<S extends z.ZodType>(
   }
   return parsed.data;
 }
+
+/** Alias matching documentation/AI_Rules.md handler examples (`validate`). */
+export const validate = validateBody;

@@ -1,6 +1,6 @@
 # Dropiti Nhost — local + cloud config
-# Secrets: repo-root `.secrets` (local) or Dashboard → Secrets (cloud).
-# See: documentation/AI_Rules.md
+# Secrets: repo-root `.secrets` file (local CLI) — template in `secrets/dotsecrets.example`.
+# See: secrets/README.md and documentation/AI_Rules.md
 
 [functions.node]
 version = 22
