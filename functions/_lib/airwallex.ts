@@ -204,6 +204,102 @@ export const airwallex = {
         }
       );
     },
+
+    async update(id: string, body: Record<string, unknown>) {
+      if (stubMode()) {
+        return { id, stub: true, ...body };
+      }
+      const payload = {
+        request_id: `update-${Date.now()}`,
+        ...body,
+      };
+      try {
+        return await airwallexRequest<Record<string, unknown>>(
+          `/pa/payment_intents/${id}`,
+          { method: "PUT", body: JSON.stringify(payload) }
+        );
+      } catch {
+        return airwallexRequest<Record<string, unknown>>(
+          `/pa/payment_intents/${id}/update`,
+          { method: "POST", body: JSON.stringify(payload) }
+        );
+      }
+    },
+
+    async attachMethod(
+      paymentIntentId: string,
+      paymentMethodId: string,
+      metadata?: Record<string, unknown>
+    ) {
+      if (stubMode()) {
+        return { id: paymentIntentId, status: "REQUIRES_CAPTURE", stub: true };
+      }
+      return airwallexRequest<Record<string, unknown>>(
+        `/pa/payment_intents/${paymentIntentId}/attach_payment_method`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            request_id: `attach-${Date.now()}`,
+            payment_method_id: paymentMethodId,
+            metadata,
+          }),
+        }
+      );
+    },
+  },
+
+  paymentMethods: {
+    async list(params: { customerId?: string; paymentMethodId?: string }) {
+      if (stubMode()) {
+        return params.paymentMethodId
+          ? { id: params.paymentMethodId, type: "card", stub: true }
+          : stubList([{ id: "pm_stub_001", type: "card" }]);
+      }
+      if (params.paymentMethodId) {
+        return airwallexRequest<Record<string, unknown>>(
+          `/pa/payment_methods/${params.paymentMethodId}`
+        );
+      }
+      const q = buildQuery({ customer_id: params.customerId });
+      return airwallexRequest<unknown>(`/pa/payment_methods${q}`);
+    },
+
+    async create(body: Record<string, unknown>) {
+      if (stubMode()) {
+        return { id: `pm_stub_${Date.now()}`, stub: true };
+      }
+      return airwallexRequest<Record<string, unknown>>("/pa/payment_methods/create", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+  },
+
+  paymentConsents: {
+    async list(params: { customerId?: string; paymentConsentId?: string }) {
+      if (stubMode()) {
+        return params.paymentConsentId
+          ? { id: params.paymentConsentId, status: "VERIFIED", stub: true }
+          : stubList([{ id: "pc_stub_001", status: "VERIFIED" }]);
+      }
+      if (params.paymentConsentId) {
+        return airwallexRequest<Record<string, unknown>>(
+          `/pa/payment_consents/${params.paymentConsentId}`
+        );
+      }
+      const q = buildQuery({ customer_id: params.customerId });
+      return airwallexRequest<unknown>(`/pa/payment_consents${q}`);
+    },
+
+    async create(body: Record<string, unknown>) {
+      if (stubMode()) {
+        return { id: `pc_stub_${Date.now()}`, stub: true };
+      }
+      return airwallexRequest<Record<string, unknown>>("/pa/payment_consents/create", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
   },
 
   paymentIntents: {
@@ -250,6 +346,23 @@ export const airwallex = {
       }
       return airwallexRequest<Record<string, unknown>>("/beneficiaries/create", {
         method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+
+    async get(id: string) {
+      if (stubMode()) {
+        return { id, nickname: "Stub Beneficiary", beneficiary_id: id };
+      }
+      return airwallexRequest<Record<string, unknown>>(`/beneficiaries/${id}`);
+    },
+
+    async update(id: string, body: Record<string, unknown>) {
+      if (stubMode()) {
+        return { id, stub: true, ...body };
+      }
+      return airwallexRequest<Record<string, unknown>>(`/beneficiaries/${id}`, {
+        method: "PATCH",
         body: JSON.stringify(body),
       });
     },
@@ -316,6 +429,81 @@ export const airwallex = {
         return { id, status: "COMPLETED", stub: true };
       }
       return airwallexRequest<Record<string, unknown>>(`/transfers/${id}`);
+    },
+
+    async cancel(id: string) {
+      if (stubMode()) {
+        return { id, status: "CANCELLED", stub: true };
+      }
+      return airwallexRequest<Record<string, unknown>>(`/transfers/${id}/cancel`, {
+        method: "POST",
+      });
+    },
+  },
+
+  customers: {
+    async list(params: { page?: string; limit?: string }) {
+      if (stubMode()) {
+        return stubList([
+          {
+            id: "cus_stub_001",
+            merchant_customer_id: "merchant_001",
+            first_name: "Stub",
+            last_name: "Customer",
+            email: "stub@dropiti.test",
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+      const q = buildQuery({
+        page_num: params.page,
+        page_size: params.limit,
+      });
+      return airwallexRequest<{ items?: unknown[]; has_more?: boolean }>(
+        `/pa/customers${q}`
+      );
+    },
+
+    async get(id: string) {
+      if (stubMode()) {
+        return {
+          id,
+          merchant_customer_id: "merchant_001",
+          first_name: "Stub",
+          last_name: "Customer",
+          email: "stub@dropiti.test",
+        };
+      }
+      return airwallexRequest<Record<string, unknown>>(`/pa/customers/${id}`);
+    },
+
+    async create(body: Record<string, unknown>) {
+      if (stubMode()) {
+        return { id: `cus_stub_${Date.now()}`, stub: true, ...body };
+      }
+      return airwallexRequest<Record<string, unknown>>("/pa/customers/create", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    },
+
+    async update(id: string, body: Record<string, unknown>) {
+      if (stubMode()) {
+        return { id, stub: true, ...body };
+      }
+      return airwallexRequest<Record<string, unknown>>(
+        `/pa/customers/${id}/update`,
+        { method: "POST", body: JSON.stringify(body) }
+      );
+    },
+
+    async remove(id: string) {
+      if (stubMode()) {
+        return { id, deleted: true, stub: true };
+      }
+      return airwallexRequest<Record<string, unknown>>(`/pa/customers/${id}`, {
+        method: "DELETE",
+      });
     },
   },
 };

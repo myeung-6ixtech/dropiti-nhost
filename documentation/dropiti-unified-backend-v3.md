@@ -1,851 +1,683 @@
-# Dropiti — Unified Nhost Backend
+# Decouple Plan — Dropiti Admin Console → Nhost Unified Backend
 
----
-
-## Version History
-
-| Version | Date | Author | Summary of Changes |
-|---|---|---|---|
-| 1.0 | May 2026 | Platform Team | Initial unified backend — architecture, namespace strategy, directory layout, shared infra, auth model, client + admin route inventory, deprecation list, Hasura roles, storage, subscriptions, coding standards, migration sequence, env vars. |
-| 2.0 | May 2026 | Platform Team | Full admin interface expansion: property moderation, content moderation, analytics & reporting, system config, support & ticketing, audit logs. Admin Offer Inbox + WhatsApp outreach. Transfer Ownership Invitation (DB schema, WhatsApp service, 5 routes, UI spec, token lifecycle). Updated directory layout, env vars, DB tables, migration sequence. |
-| 3.0 | May 2026 | Platform Team | **Admin console decouple audit.** Added Airwallex proxy Functions (payments, payment-intents, beneficiaries, transfers) — required by `/payments`, `/payment-intents`, `/beneficiaries`, `/transfers` pages. Added admin upload Functions (single presign + batch presign). Added `_lib/airwallex.ts` shared Airwallex API client. Added `_lib/ratelimit.ts` Upstash rate limiting helper. Migrated S3 upload to Nhost Storage. Added `AIRWALLEX_*` env vars to Functions. Updated directory layout with all new files. Updated migration sequence. |
-
-> **Governing rules:** All code must satisfy every constraint in `AI_Rules.md`. This document does not repeat them — it references them. When a rule here conflicts with `AI_Rules.md`, `AI_Rules.md` wins.
->
-> **Implementation note:** Deployed client handlers use `/v1/client/<domain>/<action>` (files under `functions/client/`). Admin handlers use `/v1/admin/<domain>/<action>`. Airwallex fund transfers live at `/v1/admin/transfers/*` — distinct from property `/v1/admin/transfer-ownership/*`.
->
-> **Sources:** `client-side-functions.md`, `admin-side-functions.md`, `admin-interface-functions.md`, `dropiti-unified-backend-v2.md`, `decouple-plan.md`, `AI_Rules.md`, `boilerplate.md`
+> **Repo:** `myeung-6ixtech/dropiti-admin-console` (main branch)
+> **Target backend:** `dropiti-nhost` Nhost Functions as documented in `dropiti-unified-backend-v2.md`
+> **Goal:** Remove all local Next.js API routes from the admin console. The frontend becomes a pure UI shell that calls Nhost Functions and Nhost services directly.
+> **Date:** May 2026
 
 ---
 
 ## Table of Contents
 
-1. [Architecture Decision](#1-architecture-decision)
-2. [URL Namespace Strategy](#2-url-namespace-strategy)
-3. [Directory Layout](#3-directory-layout)
-4. [Shared Infrastructure (`_lib/`)](#4-shared-infrastructure-_lib)
-5. [Auth Model — Unified](#5-auth-model--unified)
-6. [Client API Routes (`v1/`)](#6-client-api-routes-v1)
-7. [Admin API Routes (`v1/admin/`)](#7-admin-api-routes-v1admin)
-   - [7.1 User Management](#71-user-management)
-   - [7.2 Property Management & Moderation](#72-property-management--moderation)
-   - [7.3 Offer Management](#73-offer-management)
-   - [7.4 Admin Offer Inbox & WhatsApp Outreach](#74-admin-offer-inbox--whatsapp-outreach)
-   - [7.5 Transfer Ownership Invitation](#75-transfer-ownership-invitation)
-   - [7.6 Content Moderation](#76-content-moderation)
-   - [7.7 Analytics & Reporting](#77-analytics--reporting)
-   - [7.8 System Configuration](#78-system-configuration)
-   - [7.9 Support & Ticketing](#79-support--ticketing)
-   - [7.10 Audit Logs](#710-audit-logs)
-   - [7.11 Payments — Airwallex Proxy](#711-payments--airwallex-proxy) ⭐ New in v3.0
-   - [7.12 Payment Intents — Airwallex Proxy](#712-payment-intents--airwallex-proxy) ⭐ New in v3.0
-   - [7.13 Beneficiaries — Airwallex Proxy](#713-beneficiaries--airwallex-proxy) ⭐ New in v3.0
-   - [7.14 Transfers — Airwallex Proxy](#714-transfers--airwallex-proxy) ⭐ New in v3.0
-   - [7.15 Admin Upload](#715-admin-upload) ⭐ New in v3.0
-8. [Shared / Cross-Cutting Routes](#8-shared--cross-cutting-routes)
-9. [Routes Deprecated on Migration](#9-routes-deprecated-on-migration)
-10. [Hasura Role Strategy](#10-hasura-role-strategy)
-11. [Database Schema](#11-database-schema)
-12. [WhatsApp Service Layer](#12-whatsapp-service-layer)
-13. [Airwallex Service Layer](#13-airwallex-service-layer) ⭐ New in v3.0
-14. [Nhost Storage — Upload](#14-nhost-storage--upload)
-15. [Rate Limiting — Upstash](#15-rate-limiting--upstash) ⭐ New in v3.0
-16. [Real-Time — Subscriptions](#16-real-time--subscriptions)
-17. [Coding Standards Cheatsheet](#17-coding-standards-cheatsheet)
-18. [Migration Sequence](#18-migration-sequence)
-19. [Environment Variables Reference](#19-environment-variables-reference)
+1. [Current State Inventory](#1-current-state-inventory)
+2. [Dependency Map](#2-dependency-map)
+3. [Auth Decoupling](#3-auth-decoupling)
+4. [API Route Mapping — Current → Nhost](#4-api-route-mapping--current--nhost)
+5. [Upload & Batch Upload Decoupling](#5-upload--batch-upload-decoupling)
+6. [Airwallex Integration](#6-airwallex-integration)
+7. [S3 Bucket Migration to Nhost Storage](#7-s3-bucket-migration-to-nhost-storage)
+8. [Redis / Upstash Rate Limiting](#8-redis--upstash-rate-limiting)
+9. [Middleware — What Changes, What Stays](#9-middleware--what-changes-what-stays)
+10. [Frontend API Client Refactor](#10-frontend-api-client-refactor)
+11. [Environment Variable Changes](#11-environment-variable-changes)
+12. [Files to Delete](#12-files-to-delete)
+13. [Files to Create / Modify](#13-files-to-create--modify)
+14. [Gaps Identified — Missing Nhost Functions](#14-gaps-identified--missing-nhost-functions)
+15. [Decoupling Execution Order](#15-decoupling-execution-order)
+16. [Verification Checklist](#16-verification-checklist)
 
 ---
 
-## 1. Architecture Decision
+## 1. Current State Inventory
 
-### Current state (two separate repos, two backends)
+### Protected pages in the admin console (from `middleware.ts`)
 
-```
-dropiti-v3 (Next.js)
-  └── src/app/api/v1/*         ← ~55 REST routes, Hasura via admin secret
-  └── src/app/api/graphql/*    ← GraphQL proxy + browser/server clients
-
-dropiti-admin-console (Next.js)
-  └── src/app/api/login        ← PBKDF2 session auth (legacy)
-  └── src/app/api/auth/check   ← Session validation
-  └── src/app/api/auth/logout  ← Session teardown
-  └── middleware.ts            ← JWT guard (already on Nhost nhost_access_token)
-  └── Direct Hasura queries    ← Using HASURA_ADMIN_SECRET in server components
-  └── S3 uploads               ← @aws-sdk/client-s3
-  └── Airwallex calls          ← @airwallex/components-sdk (API key exposed)
-```
-
-### Target state (one Nhost Functions repo)
-
-```
-dropiti-nhost (Nhost Functions)
-  └── functions/<domain>/*     ← Client-facing logic   → URL /v1/<domain>/...
-  └── functions/admin/*        ← Admin operations      → URL /v1/admin/...
-  └── functions/_lib/*         ← Shared infra
-  └── functions/health.ts      ← Health check          → URL /v1/health
-```
-
-> **Routing:** Nhost maps `functions/<path>.ts` → `{FUNCTIONS_URL}/v1/<path>`. No `v1/` subfolder in `functions/`.
-
-**Key v3.0 decisions:**
-- Airwallex API calls proxied through Nhost Functions — API key never reaches the browser
-- S3 replaced by Nhost Storage — `@aws-sdk/client-s3` removed from admin console
-- Upstash rate limiting moved from admin console to `_lib/ratelimit.ts` in Functions
-- Admin console `src/app/api/` directory deleted entirely
-
----
-
-## 2. URL Namespace Strategy
-
-```
-{FUNCTIONS_URL}/v1/health                          ← Health ping
-{FUNCTIONS_URL}/v1/<domain>/<action>               ← Client app routes
-{FUNCTIONS_URL}/v1/admin/<domain>/<action>         ← Admin console routes
-```
-
-**Admin console base URL config:**
-```ts
-const ADMIN_API = `${process.env.NEXT_PUBLIC_FUNCTIONS_URL}/v1/admin`
-```
-
-**Client app base URL config:**
-```ts
-const API = `${process.env.NEXT_PUBLIC_FUNCTIONS_URL}/v1`
-```
-
----
-
-## 3. Directory Layout
-
-```
-functions/
-├── package.json
-├── package-lock.json              ← always committed
-├── tsconfig.json                  ← strict, ES2022, CommonJS
-│
-├── _lib/
-│   ├── env.ts                     ← only source of process.env reads
-│   ├── hasura.ts                  ← hasuraQuery<T>() helper
-│   ├── auth.ts                    ← requireAuth(), getUserId(), requireAdminRole()
-│   ├── respond.ts                 ← ok(), fail()
-│   ├── validate.ts                ← validate(req, res, Schema)
-│   ├── whatsapp.ts                ← WhatsApp service layer (v2.0)
-│   ├── airwallex.ts               ← Airwallex API client ⭐ New v3.0
-│   ├── ratelimit.ts               ← Upstash rate limiting helper ⭐ New v3.0
-│   └── enums/
-│       └── offer-actions.ts       ← ACCEPT | REJECT | COUNTER | WITHDRAW
-│
-├── health.ts                      ← GET /v1/health
-│
-├── users/
-│   ├── create-user.ts
-│   ├── get-user-by-id.ts
-│   ├── get-user-by-uuid.ts
-│   └── update-user.ts
-│
-├── tenants/
-│   ├── index.ts
-│   └── profile.ts
-│
-├── properties/
-│   ├── create-property.ts
-│   ├── get-drafts.ts
-│   ├── delete-draft.ts
-│   ├── publish-draft.ts
-│   ├── get-listings.ts
-│   ├── get-property.ts
-│   ├── get-property-by-uuid.ts
-│   ├── get-property-count-by-user.ts
-│   └── update-property.ts
-│
-├── offers/
-│   ├── create-offer.ts
-│   ├── get-offers.ts
-│   ├── get-offers-by-id.ts
-│   ├── get-offers-by-initiator.ts
-│   ├── accept-offer.ts
-│   ├── reject-offer.ts
-│   ├── counter-offer.ts
-│   ├── withdraw-offer.ts
-│   ├── get-negotiation-state.ts
-│   ├── get-offer-actions.ts
-│   └── get-review-opportunities.ts
-│
-├── reviews/
-│   ├── create-review.ts
-│   ├── update-review.ts
-│   ├── delete-review.ts
-│   ├── get-reviews-by-property.ts
-│   ├── get-reviews-by-user.ts
-│   └── mark-helpful.ts
-│
-├── chat/
-│   ├── get-or-create-room.ts
-│   ├── get-chat-rooms.ts
-│   ├── get-room-messages.ts
-│   └── send-message.ts
-│
-├── notifications/
-│   ├── index.ts
-│   ├── unread-count.ts
-│   ├── mark-read.ts
-│   ├── mark-all-read.ts
-│   └── archive.ts
-│
-├── transfer-ownership/
-│   ├── validate.ts                ← GET  /v1/transfer-ownership/validate?token=
-│   └── claim.ts                   ← POST /v1/transfer-ownership/claim
-│
-├── upload/
-│   └── presign.ts                 ← POST /v1/upload/presign (client-side)
-│
-└── admin/
-    ├── users/
-    │   ├── index.ts               ← GET    /v1/admin/users
-    │   ├── get-user.ts
-    │   ├── update-user.ts
-    │   ├── verify-user.ts
-    │   ├── suspend-user.ts
-    │   ├── reactivate-user.ts
-    │   ├── ban-user.ts
-    │   ├── activity-log.ts
-    │   ├── export-user-data.ts
-    │   ├── delete-user-data.ts
-    │   └── bulk.ts
-    │
-    ├── properties/
-    │   ├── index.ts
-    │   ├── get-property.ts
-    │   ├── approve.ts
-    │   ├── reject.ts
-    │   ├── flag.ts
-    │   ├── update-property.ts
-    │   ├── feature.ts
-    │   ├── bulk.ts
-    │   ├── moderation-queue.ts
-    │   └── reports.ts
-    │
-    ├── offers/
-    │   ├── index.ts
-    │   ├── get-offer.ts
-    │   ├── incoming.ts
-    │   ├── remind.ts
-    │   ├── flag.ts
-    │   ├── cancel.ts
-    │   └── stalled.ts
-    │
-    ├── transfer-ownership/
-    │   ├── invite.ts
-    │   ├── resend.ts
-    │   └── status.ts
-    │
-    ├── reviews/
-    │   ├── moderation-queue.ts
-    │   ├── approve.ts
-    │   ├── reject.ts
-    │   └── update-review.ts
-    │
-    ├── reports/
-    │   ├── index.ts
-    │   ├── update.ts
-    │   ├── resolve.ts
-    │   └── summary.ts
-    │
-    ├── analytics/
-    │   ├── dashboard.ts
-    │   ├── users.ts
-    │   ├── properties.ts
-    │   ├── transactions.ts
-    │   ├── performance.ts
-    │   ├── export.ts
-    │   └── custom-report.ts
-    │
-    ├── settings/
-    │   ├── index.ts
-    │   ├── update.ts
-    │   ├── feature-flags.ts
-    │   ├── toggle-flag.ts
-    │   ├── email-templates.ts
-    │   └── update-template.ts
-    │
-    ├── support/
-    │   ├── tickets/
-    │   │   ├── index.ts
-    │   │   ├── get-ticket.ts
-    │   │   ├── create.ts
-    │   │   ├── update.ts
-    │   │   ├── reply.ts
-    │   │   ├── add-note.ts
-    │   │   ├── assign.ts
-    │   │   └── close.ts
-    │   └── canned-responses.ts
-    │
-    ├── audit-logs/
-    │   ├── index.ts
-    │   ├── export.ts
-    │   └── admin-activity.ts
-    │
-    ├── payments/                  ← ⭐ New v3.0 — Airwallex proxy
-    │   ├── index.ts               ← GET  /v1/admin/payments
-    │   ├── get-payment.ts         ← GET  /v1/admin/payments/:id
-    │   ├── capture.ts             ← POST /v1/admin/payments/:id/capture
-    │   └── cancel.ts              ← POST /v1/admin/payments/:id/cancel
-    │
-    ├── payment-intents/           ← ⭐ New v3.0 — Airwallex proxy
-    │   ├── index.ts               ← GET  /v1/admin/payment-intents
-    │   └── get-intent.ts          ← GET  /v1/admin/payment-intents/:id
-    │
-    ├── beneficiaries/             ← ⭐ New v3.0 — Airwallex proxy
-    │   ├── index.ts               ← GET    /v1/admin/beneficiaries
-    │   ├── create.ts              ← POST   /v1/admin/beneficiaries
-    │   └── delete.ts              ← DELETE /v1/admin/beneficiaries/:id
-    │
-    ├── transfers/                 ← ⭐ New v3.0 — Airwallex proxy
-    │   ├── index.ts               ← GET  /v1/admin/transfers
-    │   ├── create.ts              ← POST /v1/admin/transfers
-    │   └── status.ts              ← GET  /v1/admin/transfers/:id/status
-    │
-    └── upload/                    ← ⭐ New v3.0 — replaces admin S3 uploads
-        ├── presign.ts             ← POST /v1/admin/upload/presign (single)
-        └── batch.ts               ← POST /v1/admin/upload/batch (multi-file)
-```
-
----
-
-## 4. Shared Infrastructure (`_lib/`)
-
-### `_lib/env.ts`
-Single source of `process.env` reads. Updated in v3.0 with Airwallex + Upstash vars.
-
-```ts
-export const env = {
-  // Hasura
-  adminSecret:          process.env.NHOST_ADMIN_SECRET ?? process.env.HASURA_GRAPHQL_ADMIN_SECRET,
-  jwtSecret:            resolveJwtSecret(),
-  graphqlUrl:           process.env.NHOST_GRAPHQL_URL ?? buildGraphqlUrl(),
-  // WhatsApp
-  whatsappProvider:     process.env.WHATSAPP_PROVIDER ?? 'stub',
-  whatsappApiToken:     process.env.WHATSAPP_API_TOKEN,
-  whatsappPhoneId:      process.env.WHATSAPP_PHONE_NUMBER_ID,
-  invitationExpiryDays: Number(process.env.INVITATION_EXPIRY_DAYS ?? '7'),
-  // Airwallex ⭐ New v3.0
-  airwallexApiKey:      process.env.AIRWALLEX_API_KEY,
-  airwallexClientId:    process.env.AIRWALLEX_CLIENT_ID,
-  airwallexEnv:         process.env.AIRWALLEX_ENV ?? 'demo',
-  // Upstash ⭐ New v3.0
-  upstashRedisUrl:      process.env.UPSTASH_REDIS_REST_URL,
-  upstashRedisToken:    process.env.UPSTASH_REDIS_REST_TOKEN,
-}
-```
-
-### `_lib/airwallex.ts` ⭐ New in v3.0
-
-Shared Airwallex API client. All Airwallex proxy handlers import from here — never call Airwallex inline.
-
-```ts
-const AIRWALLEX_BASE = {
-  demo: 'https://api-demo.airwallex.com/api/v1',
-  prod: 'https://api.airwallex.com/api/v1',
-}
-
-// Returns a bearer token from Airwallex using CLIENT_ID + API_KEY
-async function getAirwallexToken(): Promise<string>
-
-// Generic Airwallex request — wraps fetch with auth header
-export async function airwallexRequest<T>(
-  path: string,
-  options?: RequestInit
-): Promise<T>
-
-// Typed helpers used by route handlers
-export const airwallex = {
-  payments:      { list, get },
-  paymentIntents: { list, get },
-  beneficiaries: { list, create, delete: remove },
-  transfers:     { list, create, getStatus },
-}
-```
-
-### `_lib/ratelimit.ts` ⭐ New in v3.0
-
-Upstash sliding-window rate limiter. Used by Airwallex proxy routes and any other rate-sensitive admin endpoints.
-
-```ts
-/**
- * Returns true if the request is within limits, false if it should be rejected.
- * Uses Upstash REST API (no SDK needed in Functions).
- *
- * @param key     - Unique key e.g. "airwallex:payments:{adminId}"
- * @param max     - Max requests
- * @param windowS - Window in seconds
- */
-export async function isAllowed(key: string, max: number, windowS: number): Promise<boolean>
-```
-
-Usage in a handler:
-```ts
-const allowed = await isAllowed(`airwallex:payments:${getUserId(payload)}`, 30, 60)
-if (!allowed) return fail(res, 'Rate limit exceeded', 429)
-```
-
-### `_lib/hasura.ts`, `_lib/auth.ts`, `_lib/respond.ts`, `_lib/validate.ts`, `_lib/whatsapp.ts`
-
-Unchanged from v2.0. See §4 of `dropiti-unified-backend-v2.md`.
-
----
-
-## 5. Auth Model — Unified
-
-Unchanged from v2.0. Both frontends use Nhost Auth JWT. Admin console `middleware.ts` requires zero changes.
-
-Admin users must have `"admin"` in `x-hasura-allowed-roles` — set via Nhost Auth custom claims.
-
-See full auth model in `dropiti-unified-backend-v2.md` §5.
-
----
-
-## 6. Client API Routes (`v1/`)
-
-Unchanged from v2.0. Full table in `dropiti-unified-backend-v2.md` §6.
-
----
-
-## 7. Admin API Routes (`v1/admin/`)
-
-Sections 7.1–7.10 are unchanged from v2.0. See `dropiti-unified-backend-v2.md` §7.1–7.10.
-
-The following sections are new in v3.0.
-
-### 7.11 Payments — Airwallex Proxy ⭐ New in v3.0
-
-All routes require `requireAdminRole()`. All Airwallex calls are server-side via `_lib/airwallex.ts`. The `AIRWALLEX_API_KEY` is never exposed to the browser.
-
-| Route | Method | Description |
+| Route prefix | Purpose | Backend needs |
 |---|---|---|
-| `payments/index` | `GET` | List payment intents from Airwallex. Params: `status`, `page`, `limit`, `dateFrom`, `dateTo`. Rate: 30 req/min per admin. |
-| `payments/get-payment` | `GET` | Single payment detail. Query param: `id`. |
-| `payments/capture` | `POST` | Capture a payment intent. Body: `{ id, captureAmount? }`. |
-| `payments/cancel` | `POST` | Cancel a payment intent. Body: `{ id, cancellationReason? }`. |
+| `/dashboard` | Platform KPIs + activity feed | `GET /v1/admin/analytics/dashboard` |
+| `/customers` | User management | `GET /v1/admin/users` + sub-routes |
+| `/payments` | Payment records | Airwallex API (via Nhost Function) |
+| `/transfers` | Fund/ownership transfers | `GET/POST /v1/admin/transfer-ownership/*` |
+| `/beneficiaries` | Beneficiary records | Airwallex API |
+| `/settings` | Platform configuration | `GET/PUT /v1/admin/settings` |
+| `/reports` | Analytics exports | `GET /v1/admin/analytics/*` |
+| `/properties` | Property management + moderation | `GET/POST /v1/admin/properties/*` |
+| `/payment-intents` | Payment intent lifecycle | Airwallex API |
+| `/user-management` | Admin user & role management | `GET/POST /v1/admin/users/*` |
+| `/media-library` | File/image management | Nhost Storage + `GET /v1/admin/upload/*` |
 
-**Handler pattern:**
-```ts
-export default async (req: Request, res: Response): Promise<void> => {
-  try {
-    const payload = await requireAdminRole(req, res)
-    if (!payload) return
+### Local Next.js API routes currently in the build
 
-    const allowed = await isAllowed(`payments:${getUserId(payload)}`, 30, 60)
-    if (!allowed) return fail(res, 'Rate limit exceeded', 429)
+| Route | Method | Current behaviour | Status |
+|---|---|---|---|
+| `src/app/api/login/route.ts` | `POST` | PBKDF2 auth → session token in DB cookie | **Replace with Nhost Auth** |
+| `src/app/api/auth/check/route.ts` | `GET` | Session DB lookup → user + permissions | **Replace with Nhost Auth** |
+| `src/app/api/auth/logout/route.ts` | `POST` | Invalidate session in DB + clear cookie | **Replace with Nhost Auth** |
 
-    const payments = await airwallex.payments.list({ status: req.query.status })
-    ok(res, payments)
-  } catch (err) {
-    console.error('[admin/payments/index]', err)
-    fail(res, 'Internal server error', 500)
-  }
-}
-```
+> These are the **only** API routes confirmed in the current build. All other data fetching happens via direct Hasura GraphQL calls (using `graphql-request` + `SDK_BACKEND_URL` + `SDK_HASURA_ADMIN_SECRET`).
 
-### 7.12 Payment Intents — Airwallex Proxy ⭐ New in v3.0
+### External services currently wired in
 
-| Route | Method | Description |
+| Service | SDK / package | Env vars | Used for |
+|---|---|---|---|
+| **Hasura** | `graphql-request` | `SDK_BACKEND_URL`, `HASURA_ADMIN_SECRET`, `HASURA_ENDPOINT` | All data reads/writes |
+| **Nhost Auth** | `jose` (JWT verify only) | `NHOST_JWT_SECRET`, `NEXT_PUBLIC_NHOST_SUBDOMAIN`, `NEXT_PUBLIC_NHOST_REGION` | Middleware JWT check |
+| **Airwallex** | `@airwallex/components-sdk` | `AIRWALLEX_API_KEY`, `AIRWALLEX_CLIENT_ID`, `NEXT_PUBLIC_AIRWALLEX_ENV` | Payments, transfers, beneficiaries |
+| **AWS S3** | `@aws-sdk/client-s3` | `S3_BUCKET_*` (5 vars) | File uploads |
+| **Upstash Redis** | (env-only, no SDK in pkg.json — likely via REST API) | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Rate limiting on login |
+| **react-dropzone** | `react-dropzone` | — | Drag-and-drop file upload UI |
+
+---
+
+## 2. Dependency Map
+
+How each dependency is currently used and what replaces it after decoupling:
+
+| Package | Current use | After decoupling |
 |---|---|---|
-| `payment-intents/index` | `GET` | List payment intents. Params: `status`, `page`, `limit`. |
-| `payment-intents/get-intent` | `GET` | Single intent detail. Query param: `id`. |
+| `graphql-request` | Direct Hasura queries from server components + API routes | **Keep** — admin console can continue querying Hasura directly with the Nhost JWT in the `Authorization` header. Remove admin secret usage from client. |
+| `jose` | JWT verify in `middleware.ts` | **Keep** — middleware is correct and stays unchanged |
+| `@airwallex/components-sdk` | Payments/transfers UI SDK | **Keep in frontend** — Airwallex calls go to a new Nhost Function (`admin/payments/*`) that proxies to Airwallex API server-side, keeping the API key off the client |
+| `@aws-sdk/client-s3` | S3 uploads from API routes | **Keep** — S3 remains the designated file store. Upload logic moves to a Nhost Function server-side; the SDK stays in the Functions repo, not the admin console frontend |
+| `react-dropzone` | Upload UI | **Keep** — UI component only, wire to new upload function |
+| `axios` | HTTP calls | **Keep** — used for Nhost Function calls |
 
-### 7.13 Beneficiaries — Airwallex Proxy ⭐ New in v3.0
+---
 
-| Route | Method | Description |
-|---|---|---|
-| `beneficiaries/index` | `GET` | List all beneficiaries. Params: `page`, `limit`, `search`. |
-| `beneficiaries/create` | `POST` | Create a beneficiary. Body: Airwallex beneficiary schema. |
-| `beneficiaries/delete` | `DELETE` | Remove a beneficiary. Query param: `id`. |
+## 3. Auth Decoupling
 
-### 7.14 Transfers — Airwallex Proxy ⭐ New in v3.0
+### Current auth flow (to be removed)
 
-| Route | Method | Description |
-|---|---|---|
-| `transfers/index` | `GET` | List fund transfers. Params: `status`, `page`, `limit`, `dateFrom`. |
-| `transfers/create` | `POST` | Initiate a transfer. Body: `{ beneficiaryId, amount, currency, reference }`. |
-| `transfers/status` | `GET` | Poll transfer status. Query param: `id`. |
+```
+SignInForm → POST /api/login (PBKDF2 + session token + DB write)
+           → GET /api/auth/check (session DB query)
+           → POST /api/auth/logout (session invalidate)
+           → admin_session cookie (HTTP-only)
+```
 
-### 7.15 Admin Upload ⭐ New in v3.0
+### Target auth flow (Nhost Auth)
 
-Replaces the current `@aws-sdk/client-s3` upload from the admin console. Both routes require `requireAdminRole()`.
+```
+SignInForm → nhost.auth.signIn({ email, password })
+           → Nhost sets nhost_access_token cookie automatically
+           → middleware.ts reads nhost_access_token (already correct — NO CHANGE)
+           → useAuthenticationStatus() / useUserData() replaces GET /api/auth/check
+           → nhost.auth.signOut() replaces POST /api/auth/logout
+```
 
-#### `POST /v1/admin/upload/presign` — Single file
+### Steps
+
+**1. Install `@nhost/nextjs`**
+```bash
+yarn add @nhost/nextjs @nhost/react
+```
+
+**2. Create `src/lib/nhost.ts`**
 ```ts
-Body: { filename: string; mimeType: string; bucketId?: string }
-Returns: { uploadUrl: string; fileId: string }
-```
-Client uploads directly to the returned `uploadUrl` (PUT to Nhost Storage).
+import { NhostClient } from '@nhost/nextjs'
 
-#### `POST /v1/admin/upload/batch` — Multiple files
-```ts
-Body: Array<{ filename: string; mimeType: string; bucketId?: string }>
-Returns: Array<{ uploadUrl: string; fileId: string; filename: string }>
-```
-Client iterates the array and PUTs each file to its corresponding `uploadUrl`.
-
-**Validation in both routes:**
-- MIME type must be in allowlist: `["image/jpeg","image/png","image/webp","application/pdf","video/mp4"]`
-- Max file size enforced by Nhost Storage bucket policy (set in Nhost dashboard)
-- Max 20 files per batch request
-
-**Image processing constants** (moved from admin console env vars):
-```ts
-const IMAGE_MAX_WIDTH  = 1600
-const IMAGE_MAX_HEIGHT = 1600
-const IMAGE_WEBP_QUALITY = 75
-// Resizing happens client-side before upload, or via a Nhost Storage transform URL
-```
-
----
-
-## 8. Shared / Cross-Cutting Routes
-
-| Route | Method | Description |
-|---|---|---|
-| `health.ts` | `GET` | `{ ok: true, data: { status: "healthy" } }`. No auth. First check after every deploy. |
-
----
-
-## 9. Routes Deprecated on Migration
-
-All routes from v2.0 deprecation list plus new additions in v3.0:
-
-| Current route | Reason |
-|---|---|
-| `src/app/api/graphql/route.ts` | GraphQL proxy — removed |
-| `src/app/api/graphql/client.ts` | Replaced by `@nhost/nextjs` + Apollo/urql |
-| `src/app/api/graphql/serverClient.ts` | Replaced by `hasuraQuery()` |
-| `src/app/api/test-*` | All test routes — delete |
-| `v1/reviews/test-review-schema` | Dev-only — delete |
-| `POST /api/login` (admin-console) | Replaced by Nhost Auth `signIn()` |
-| `GET /api/auth/check` (admin-console) | Replaced by `useAuthenticationStatus()` |
-| `POST /api/auth/logout` (admin-console) | Replaced by Nhost Auth `signOut()` |
-| Admin console S3 upload code | Replaced by Nhost Storage + `admin/upload/*` Functions |
-| Admin console direct Hasura calls with admin secret | Replaced by Nhost Function calls with JWT |
-
----
-
-## 10. Hasura Role Strategy
-
-Unchanged from v2.0. See `dropiti-unified-backend-v2.md` §10.
-
-**New in v3.0:** The `admin/payments/*`, `admin/transfers/*`, `admin/beneficiaries/*`, and `admin/upload/*` routes do not make Hasura queries — they proxy to Airwallex or Nhost Storage. They still require `requireAdminRole()` for auth.
-
----
-
-## 11. Database Schema
-
-Unchanged from v2.0. See `dropiti-unified-backend-v2.md` §11 for all migration SQL.
-
-**No new tables added in v3.0.** Airwallex data is not persisted to Hasura — it's fetched live from the Airwallex API on each request.
-
----
-
-## 12. WhatsApp Service Layer
-
-Unchanged from v2.0. See `dropiti-unified-backend-v2.md` §12.
-
----
-
-## 13. Airwallex Service Layer ⭐ New in v3.0
-
-**File:** `functions/_lib/airwallex.ts`
-
-The admin console currently uses `@airwallex/components-sdk` with `AIRWALLEX_API_KEY` in `.env`. After decoupling, the API key lives exclusively in Nhost Functions `.secrets`. The browser-facing Airwallex Elements SDK (`NEXT_PUBLIC_AIRWALLEX_ENV`, `AIRWALLEX_CLIENT_ID`) stays in the admin console frontend for payment form rendering — those are browser-safe credentials.
-
-### Environment setup
-
-```
-# .secrets (Nhost Functions — never in admin console frontend)
-AIRWALLEX_API_KEY=d129b557fe0d1dea...
-AIRWALLEX_CLIENT_ID=WyQ2_hk4TlaAnOuaOSV1FQ
-AIRWALLEX_ENV=demo   # or prod
-```
-
-### Token caching
-
-Airwallex tokens expire in 30 minutes. The service layer caches the token in-memory and refreshes automatically:
-
-```ts
-let cachedToken: { value: string; expiresAt: number } | null = null
-
-async function getAirwallexToken(): Promise<string> {
-  if (cachedToken && Date.now() < cachedToken.expiresAt - 60_000) {
-    return cachedToken.value
-  }
-  const res = await fetch(`${baseUrl}/authentication/login`, {
-    method: 'POST',
-    headers: {
-      'x-client-id': env.airwallexClientId!,
-      'x-api-key':   env.airwallexApiKey!,
-    },
-  })
-  const data = await res.json()
-  cachedToken = { value: data.token, expiresAt: Date.now() + 29 * 60 * 1000 }
-  return cachedToken.value
-}
-```
-
-### Error handling
-
-Airwallex errors follow a different shape than Hasura errors. Map them to the standard `fail()` response:
-
-```ts
-// Airwallex 4xx → fail(res, airwallexError.message, 400)
-// Airwallex 401 → fail(res, 'Airwallex auth failed', 502)
-// Airwallex 5xx → fail(res, 'Airwallex service error', 502)
-// Network error → fail(res, 'Internal server error', 500)
-```
-
-Never leak raw Airwallex error payloads (may contain API key in headers or sensitive amounts).
-
-### Phase roadmap
-
-| Phase | Item | Status |
-|---|---|---|
-| 1 | `_lib/airwallex.ts` with stub mode (returns mock data) | Implement first |
-| 1 | All proxy Function files (payments, payment-intents, beneficiaries, transfers) | Implement |
-| 2 | Switch `AIRWALLEX_ENV=prod` in production `.secrets` | When ready for production |
-| 2 | Add Airwallex webhook handler for async payment status updates | Future |
-
----
-
-## 14. Nhost Storage — Upload
-
-### Client-side (admin console, simple single upload)
-```ts
-const { fileMetadata, error } = await nhost.storage.upload({
-  file,
-  bucketId: 'admin-media',
+export const nhost = new NhostClient({
+  subdomain: process.env.NEXT_PUBLIC_NHOST_SUBDOMAIN!,
+  region:    process.env.NEXT_PUBLIC_NHOST_REGION!,
 })
 ```
 
-### Server-validated (via Nhost Function — single file)
-```
-POST /v1/admin/upload/presign
-Body: { filename, mimeType, bucketId? }
-Returns: { uploadUrl, fileId }
+**3. Wrap the app in `NhostProvider` (`src/app/layout.tsx`)**
+```tsx
+import { NhostProvider } from '@nhost/nextjs'
+import { nhost } from '@/lib/nhost'
+
+export default function RootLayout({ children }) {
+  return (
+    <NhostProvider nhost={nhost}>
+      {children}
+    </NhostProvider>
+  )
+}
 ```
 
-### Server-validated (via Nhost Function — batch)
-```
-POST /v1/admin/upload/batch
-Body: [{ filename, mimeType, bucketId? }, ...]
-Returns: [{ uploadUrl, fileId, filename }, ...]
-```
+**4. Update `src/context/AuthContext.tsx`**
 
-### Nhost Storage URL pattern
+Replace session cookie logic with Nhost hooks:
+
 ```ts
-// Get public URL for a file
-nhost.storage.getPublicUrl({ fileId })
-// → https://fcuycyemqprjrkbshlcj.storage.ap-southeast-1.nhost.run/v1/files/{fileId}
+import { useAuthenticationStatus, useUserData } from '@nhost/react'
+
+// Replace:  GET /api/auth/check
+// With:     useAuthenticationStatus() + useUserData()
+
+// Replace:  POST /api/auth/logout
+// With:     nhost.auth.signOut()
+
+// Replace:  POST /api/login
+// With:     nhost.auth.signIn({ email, password })
 ```
 
-### Buckets to create in Nhost dashboard
+The `hasPermission()` utility stays — wire it to Nhost's JWT claims (`x-hasura-allowed-roles`) or a custom claims field that lists permission strings.
 
-| Bucket ID | Purpose | Access |
-|---|---|---|
-| `property-images` | Client property listing photos | Public read |
-| `admin-media` | Admin media library uploads | Admin-only read |
-| `user-avatars` | User profile pictures | Public read |
-| `documents` | Lease agreements, ID verification | Private (signed URL) |
+**5. Admin users must have `"admin"` in `x-hasura-allowed-roles`**
 
----
-
-## 15. Rate Limiting — Upstash ⭐ New in v3.0
-
-Upstash Redis rate limiting moves from the admin console frontend to `_lib/ratelimit.ts` in Nhost Functions.
-
-**Add to Nhost Functions `.secrets`:**
-```
-UPSTASH_REDIS_REST_URL=https://selected-bear-31650.upstash.io
-UPSTASH_REDIS_REST_TOKEN=AXuiAAIncDI4...
-```
-
-**Remove from admin console `.env`:**
-```
-# DELETE THESE:
-UPSTASH_REDIS_REST_URL=...
-UPSTASH_REDIS_REST_TOKEN=...
-```
-
-### Rate limit policies per route category
-
-| Route category | Limit | Window |
-|---|---|---|
-| Admin reads (users, properties) | 100 req | 60s |
-| Admin writes (suspend, approve) | 30 req | 60s |
-| Admin bulk operations | 10 req | 60s |
-| Admin export (analytics, audit) | 5 req | 3600s |
-| Airwallex proxy (all methods) | 30 req | 60s |
-| Admin upload (presign, batch) | 20 req | 60s |
-
-The `isAllowed()` function uses per-admin keying (`{category}:{adminId}`) so limits are per-user not global.
-
----
-
-## 16. Real-Time — Subscriptions
-
-Unchanged from v2.0. Chat and notifications read paths migrate to Hasura subscriptions. See `dropiti-unified-backend-v2.md` §14.
-
----
-
-## 17. Coding Standards Cheatsheet
-
-Unchanged from v2.0, with one addition for Airwallex proxy routes:
-
-**Airwallex proxy handler pattern:**
-```ts
-export default async (req: Request, res: Response): Promise<void> => {
-  try {
-    // 1. Admin auth
-    const payload = await requireAdminRole(req, res)
-    if (!payload) return
-
-    // 2. Rate limit
-    const allowed = await isAllowed(`airwallex:payments:${getUserId(payload)}`, 30, 60)
-    if (!allowed) return fail(res, 'Rate limit exceeded', 429)
-
-    // 3. Validate input
-    const query = validate(req, res, MySchema)
-    if (!query) return
-
-    // 4. Airwallex call
-    const result = await airwallex.payments.list(query)
-
-    // 5. Respond
-    ok(res, result)
-  } catch (err) {
-    console.error('[admin/payments/index]', err)
-    fail(res, 'Internal server error', 500)
+Configure in Nhost Dashboard → Auth → Custom Claims:
+```json
+{
+  "https://hasura.io/jwt/claims": {
+    "x-hasura-allowed-roles": ["user", "admin"],
+    "x-hasura-default-role": "user",
+    "x-hasura-user-id": "{{profile.id}}"
   }
 }
 ```
 
-Full cheatsheet in `dropiti-unified-backend-v2.md` §15.
+**6. Middleware stays unchanged** — it already reads `nhost_access_token` and checks `x-hasura-allowed-roles` for `"admin"`.
 
 ---
 
-## 18. Migration Sequence
+## 4. API Route Mapping — Current → Nhost
 
-Phases 1–5 from v2.0 are preserved. New steps are added at Phase 2c.
+| Current local route | Method | Maps to Nhost Function | Notes |
+|---|---|---|---|
+| `/api/login` | `POST` | Nhost Auth `signIn()` | Delete local route |
+| `/api/auth/check` | `GET` | `useAuthenticationStatus()` hook | Delete local route |
+| `/api/auth/logout` | `POST` | Nhost Auth `signOut()` | Delete local route |
 
-### Phase 1 — Foundation
-_(Unchanged from v2.0)_
-1. Set up `dropiti-nhost` with `_lib/` files — including new `airwallex.ts` (stub) and `ratelimit.ts`
-2. Deploy `health.ts`. Confirm `GET /v1/health`
-3. Nhost Auth custom claims for admin role
-4. Verify admin console `middleware.ts`
-5. Run all DB migrations
+No other local API routes exist. **All other data currently comes from direct Hasura GraphQL calls**, which will be replaced by calling Nhost Functions at `FUNCTIONS_URL/v1/admin/*`.
 
-### Phase 2a — Transfer Ownership & Admin Offer Inbox
-_(Unchanged from v2.0)_
+### Hasura direct calls → Nhost Functions
 
-### Phase 2b — Full Admin Expansion
-_(Unchanged from v2.0)_
+The admin console currently queries Hasura directly using the admin secret. After decoupling, it calls Nhost Functions which run queries server-side with the admin secret. The frontend sends its Nhost JWT as a Bearer token.
 
-### Phase 2c — Airwallex Proxy & Upload Functions ⭐ New in v3.0
-18. Implement `_lib/airwallex.ts` with stub mode
-19. Implement `admin/payments/*`, `admin/payment-intents/*`, `admin/beneficiaries/*`, `admin/transfers/*`
-20. Implement `admin/upload/presign.ts`, `admin/upload/batch.ts`
-21. Test all Airwallex proxy routes with admin JWT (stub mode — check shape not live data)
-22. Switch to live Airwallex credentials in staging, confirm real data flows
-23. Update admin console `/payments`, `/payment-intents`, `/beneficiaries`, `/transfers`, `/media-library` to call Nhost Functions
+**Before (direct Hasura, admin secret exposed in server component):**
+```ts
+import { GraphQLClient } from 'graphql-request'
+const client = new GraphQLClient(process.env.SDK_BACKEND_URL!, {
+  headers: { 'x-hasura-admin-secret': process.env.HASURA_ADMIN_SECRET! }
+})
+const data = await client.request(GET_USERS_QUERY)
+```
 
-### Phase 2d — Admin Console Auth Decoupling ⭐ New in v3.0
-24. Add `@nhost/nextjs`, `@nhost/react` to admin console
-25. Create `src/lib/nhost.ts`, `src/lib/admin-api.ts`
-26. Rewrite `AuthContext.tsx` to use Nhost hooks
-27. Test login → dashboard → logout via Nhost Auth
-28. Delete `src/app/api/login/route.ts`, `src/app/api/auth/check/route.ts`, `src/app/api/auth/logout/route.ts`
-29. Remove `@aws-sdk/client-s3`, all `S3_BUCKET_*` env vars
-30. Remove `HASURA_ADMIN_SECRET`, `SDK_BACKEND_URL`, `HASURA_ENDPOINT` from admin console
-31. Remove Upstash env vars from admin console (now in Nhost Functions `.secrets`)
-32. Add `NEXT_PUBLIC_FUNCTIONS_URL` to admin console `.env`
-
-### Phase 3 — Client Routes
-_(Unchanged from v2.0, steps 18–20 renumbered to 33–35)_
-
-### Phase 4 — Real-Time Migration
-_(Unchanged from v2.0)_
-
-### Phase 5 — Cleanup & Production
-_(Unchanged from v2.0, plus:)_
-- Remove `@airwallex/components-sdk` server-side usage from admin console (keep UI Elements only)
-- Confirm `AIRWALLEX_API_KEY` is not in any frontend env file
-- Run `grep -r "AIRWALLEX_API_KEY\|S3_BUCKET\|HASURA_ADMIN_SECRET\|SDK_BACKEND_URL" src/` in admin console — must return 0 results
-
-### Operational check after every phase
-```bash
-GET /v1/health                                    # must return { ok: true }
-# Client route with user JWT → 200
-# Admin route with admin JWT → 200
-# Admin route with user JWT → 403
-# /v1/admin/payments with admin JWT → 200 (even in stub mode)
-# /v1/admin/upload/batch with admin JWT → returns presigned URLs
+**After (call Nhost Function with JWT):**
+```ts
+const res = await fetch(
+  `https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/users`,
+  { headers: { Authorization: `Bearer ${nhost.auth.getAccessToken()}` } }
+)
+const { data } = await res.json()
 ```
 
 ---
 
-## 19. Environment Variables Reference
+## 5. Upload & Batch Upload Decoupling
 
-### Nhost Functions `.secrets` / Nhost Dashboard
+### Current state
 
-| Variable | Notes |
-|---|---|
-| `NHOST_ADMIN_SECRET` | Falls back to `HASURA_GRAPHQL_ADMIN_SECRET` |
-| `NHOST_JWT_SECRET` | JSON `{ "key": "...", "type": "HS256" }` — parse `.key` |
-| `NHOST_GRAPHQL_URL` | Auto-injected. Falls back to `NHOST_SUBDOMAIN` + `NHOST_REGION` |
-| `NHOST_SUBDOMAIN` | Auto-injected |
-| `NHOST_REGION` | Auto-injected |
-| `WHATSAPP_PROVIDER` | `stub` / `meta` / `twilio` |
-| `WHATSAPP_API_TOKEN` | Required when provider ≠ stub |
-| `WHATSAPP_PHONE_NUMBER_ID` | Meta Cloud API only |
-| `INVITATION_EXPIRY_DAYS` | Default `7` |
-| `AIRWALLEX_API_KEY` | **Server-only** — never in frontend ⭐ New v3.0 |
-| `AIRWALLEX_CLIENT_ID` | Server-side Airwallex auth ⭐ New v3.0 |
-| `AIRWALLEX_ENV` | `demo` or `prod` ⭐ New v3.0 |
-| `UPSTASH_REDIS_REST_URL` | Moved from admin console ⭐ New v3.0 |
-| `UPSTASH_REDIS_REST_TOKEN` | Moved from admin console ⭐ New v3.0 |
+The admin console has `@aws-sdk/client-s3` in dependencies and `S3_BUCKET_*` env vars. The `react-dropzone` UI component is used for the media library drag-and-drop. Upload handling currently runs through a server component or API route that uses the AWS SDK directly — meaning the S3 credentials live in the admin frontend environment.
 
-### Admin console frontend `.env`
+### Target state — AWS S3 stays, but moves server-side
 
-| Variable | Keep/Remove/New | Notes |
-|---|---|---|
-| `NHOST_JWT_SECRET` | **Keep** | `middleware.ts` JWT verification |
-| `NEXT_PUBLIC_NHOST_SUBDOMAIN` | **Keep** | `@nhost/nextjs` client |
-| `NEXT_PUBLIC_NHOST_REGION` | **Keep** | `@nhost/nextjs` client |
-| `NEXT_PUBLIC_SITE_URL` | **Keep** | Auth redirect URL |
-| `NEXT_PUBLIC_AIRWALLEX_ENV` | **Keep** | Airwallex Elements (browser-safe) |
-| `AIRWALLEX_CLIENT_ID` | **Keep** | Airwallex Elements (browser-safe) |
-| `NEXT_PUBLIC_FUNCTIONS_URL` | **NEW ⭐** | Base URL for all Nhost Function calls |
-| `SDK_BACKEND_URL` | **REMOVE** | Direct Hasura — replaced by Functions |
-| `HASURA_ADMIN_SECRET` | **REMOVE** | Server secret — move to Functions `.secrets` |
-| `HASURA_ENDPOINT` | **REMOVE** | Same |
-| `AIRWALLEX_API_KEY` | **REMOVE** | Move to Functions `.secrets` |
-| `S3_BUCKET_ACCESS_KEY` | **REMOVE** | AWS S3 gone |
-| `S3_BUCKET_SECRET_KEY` | **REMOVE** | AWS S3 gone |
-| `S3_BUCKET_DOMAIN_URL` | **REMOVE** | AWS S3 gone |
-| `S3_BUCKET_AWS_REGION` | **REMOVE** | AWS S3 gone |
-| `S3_BUCKET_NAME` | **REMOVE** | AWS S3 gone |
-| `IMAGE_MAX_WIDTH` | **REMOVE** | Constant in Functions |
-| `IMAGE_MAX_HEIGHT` | **REMOVE** | Constant in Functions |
-| `IMAGE_WEBP_QUALITY` | **REMOVE** | Constant in Functions |
-| `UPSTASH_REDIS_REST_URL` | **REMOVE** | Move to Functions `.secrets` |
-| `UPSTASH_REDIS_REST_TOKEN` | **REMOVE** | Move to Functions `.secrets` |
-| `JWT_SECRET` | **REMOVE** | Legacy — replaced by `NHOST_JWT_SECRET` |
-| `ROOT_EMAIL` | **REMOVE** | Legacy seed credential |
-| `ROOT_PASSWORD` | **REMOVE** | Legacy seed credential |
-| `NEXT_PUBLIC_API_URL` | **REMOVE** | Was pointing to old local API |
-| `NEXT_PUBLIC_CLIENT_SECRET` | **Review** | If Airwallex-specific keep; otherwise remove |
+**AWS S3 is the designated file store and does not change.** The only change is where the AWS SDK runs: it moves from the admin console frontend into a Nhost Function, so `S3_BUCKET_ACCESS_KEY` and `S3_BUCKET_SECRET_KEY` are never exposed to the browser.
 
-**Local development** — copy `secrets/dotsecrets.example` to repo-root `.secrets`. Never commit `.secrets`.
+The admin console frontend calls the Nhost Function with the file. The Function handles S3 using its own server-side env vars and returns the final S3 URL.
+
+#### Scenario A: Single file upload (media library, property images)
+
+```
+Admin console (browser)
+  → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/presign
+    Authorization: Bearer <nhost_access_token>
+    Body: { filename, mimeType }
+  ← { uploadUrl (S3 presigned PUT URL), s3Key, publicUrl }
+
+Admin console
+  → PUT <uploadUrl>   ← uploads file directly to S3
+```
+
+The Nhost Function (`admin/upload/presign.ts`) uses `@aws-sdk/client-s3` to generate an S3 presigned URL using server-side credentials, validates the MIME type, enforces size limits, and returns the URL. The admin console never touches S3 credentials.
+
+#### Scenario B: Batch upload (multiple files, e.g. bulk property images)
+
+```
+Admin console (browser)
+  → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/batch
+    Authorization: Bearer <nhost_access_token>
+    Body: [{ filename, mimeType }, ...]
+  ← [{ uploadUrl, s3Key, publicUrl, filename }, ...]
+
+Admin console
+  → PUT each uploadUrl in parallel   ← uploads files directly to S3
+```
+
+```ts
+// admin console — batch upload wired to react-dropzone
+const ADMIN_API = 'https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin'
+
+const res = await fetch(`${ADMIN_API}/upload/batch`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify(files.map(f => ({ filename: f.name, mimeType: f.type })))
+})
+const { data: presignedItems } = await res.json()
+
+await Promise.all(
+  presignedItems.map(({ uploadUrl }: { uploadUrl: string }, i: number) =>
+    fetch(uploadUrl, { method: 'PUT', body: files[i] })
+  )
+)
+// Store presignedItems[i].publicUrl in Hasura against the property/media record
+```
+
+#### S3 URL pattern — unchanged
+
+```ts
+// URLs remain exactly as they are today:
+`https://tastyplates-bucket.s3.ap-northeast-2.amazonaws.com/${s3Key}`
+// The Nhost Function constructs this and returns it as publicUrl
+```
+
+### Upload checklist
+
+- [ ] Add `@aws-sdk/client-s3` to `functions/package.json` (Nhost Functions repo)
+- [ ] Add `S3_BUCKET_*` vars to Nhost Functions `.secrets` (move from admin console `.env`)
+- [ ] Implement `functions/admin/upload/presign.ts` (single file presigned URL)
+- [ ] Implement `functions/admin/upload/batch.ts` (multi-file presigned URLs)
+- [ ] Wire `react-dropzone` in admin console to call `${ADMIN_API}/upload/presign` or `/upload/batch`
+- [ ] Remove `@aws-sdk/client-s3` from admin console `package.json` (it moves to Functions repo)
+- [ ] Remove `S3_BUCKET_*` env vars from admin console `.env` (they move to Functions `.secrets`)
 
 ---
 
-*Dropiti Unified Backend v3.0 — May 2026. Maintain alongside `AI_Rules.md` and `decouple-dropiti-admin.md`. Update version history on every structural change.*
+## 6. Airwallex Integration
+
+### Current state
+
+`@airwallex/components-sdk` is installed. Env vars `AIRWALLEX_API_KEY`, `AIRWALLEX_CLIENT_ID`, `NEXT_PUBLIC_AIRWALLEX_ENV` are present. The SDK is used for the `/payments`, `/payment-intents`, and `/beneficiaries` pages.
+
+### Problem with current approach
+
+`AIRWALLEX_API_KEY` is a **server-side secret** — it must never reach the browser. In the current build it's likely used in server components or API routes. After decoupling (no local API routes), all Airwallex API calls that use the API key must go through Nhost Functions.
+
+### New Nhost Functions required (added to v3 gap list)
+
+| Function | Method | Description |
+|---|---|---|
+| `admin/payments/index.ts` | `GET` | List payments — proxies to Airwallex `/api/v1/pa/payment_intents` |
+| `admin/payments/get-payment.ts` | `GET` | Single payment detail |
+| `admin/payments/capture.ts` | `POST` | Capture a payment intent |
+| `admin/payments/cancel.ts` | `POST` | Cancel a payment intent |
+| `admin/beneficiaries/index.ts` | `GET` | List beneficiaries from Airwallex |
+| `admin/beneficiaries/create.ts` | `POST` | Create beneficiary |
+| `admin/beneficiaries/delete.ts` | `DELETE` | Remove beneficiary |
+| `admin/transfers/index.ts` | `GET` | List transfer records |
+| `admin/transfers/create.ts` | `POST` | Initiate a transfer |
+| `admin/transfers/status.ts` | `GET` | Transfer status |
+
+All these Functions use `requireAdminRole()` and make server-side calls to Airwallex using `AIRWALLEX_API_KEY` from `_lib/env.ts`.
+
+### Airwallex client SDK (public, browser-safe)
+
+`NEXT_PUBLIC_AIRWALLEX_ENV` and `NEXT_PUBLIC_CLIENT_SECRET` are already `NEXT_PUBLIC_*` — these stay in the frontend for the Airwallex Elements UI (payment form rendering). Only the API key moves to the Function layer.
+
+---
+
+## 7. S3 — What Moves, What Stays
+
+AWS S3 remains the designated file store. No data migration is required. The only change is that S3 credentials move out of the admin console frontend and into Nhost Functions `.secrets`, where the AWS SDK runs server-side.
+
+| Item | Action |
+|---|---|
+| `@aws-sdk/client-s3` in admin console | **Remove** — move to `functions/package.json` in the Nhost Functions repo |
+| `S3_BUCKET_ACCESS_KEY` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_SECRET_KEY` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_DOMAIN_URL` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_AWS_REGION` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_NAME` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `IMAGE_MAX_WIDTH`, `IMAGE_MAX_HEIGHT`, `IMAGE_WEBP_QUALITY` | **Move** to Nhost Function `admin/upload/batch.ts` as server-side constants |
+| Existing S3 bucket + files | **No change** — same bucket, same URLs, nothing migrated |
+
+---
+
+## 8. Redis / Upstash Rate Limiting
+
+### Current state
+
+`UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are present. Upstash is likely used for login rate limiting (max 5 attempts per 15 minutes) in the `/api/login` route.
+
+### After decoupling
+
+The `/api/login` route is deleted (Nhost Auth handles login). Nhost Auth has built-in brute-force protection. The Upstash dependency can be removed from the admin console frontend entirely.
+
+If rate limiting is still needed for other Nhost Functions (e.g. the Airwallex proxy endpoints), move the Upstash calls to `_lib/ratelimit.ts` in the `dropiti-nhost` Functions repo:
+
+```ts
+// functions/_lib/ratelimit.ts
+export async function checkRateLimit(key: string, max: number, windowSeconds: number): Promise<boolean> {
+  const url  = process.env.UPSTASH_REDIS_REST_URL!
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN!
+  // Use Upstash REST API for sliding window counter
+}
+```
+
+Add `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` to the Nhost Functions `.secrets` file.
+
+**Result:** Remove Upstash env vars from admin console frontend entirely.
+
+---
+
+## 9. Middleware — What Changes, What Stays
+
+`middleware.ts` is **already correct** and requires **zero changes** for the decoupling. It:
+
+- Reads `nhost_access_token` cookie ✅
+- Verifies JWT with `NHOST_JWT_SECRET` via `jose` ✅
+- Checks `x-hasura-allowed-roles` for `"admin"` ✅
+- Skips `/api/*` paths ✅
+- Redirects to `/signin` on failure ✅
+- Redirects authenticated admins away from `/signin` ✅
+
+The only thing that changes is how the `nhost_access_token` gets **set** — it will now be set by Nhost Auth's `signIn()` instead of the local `/api/login` route.
+
+---
+
+## 10. Frontend API Client Refactor
+
+### Create `src/lib/admin-api.ts`
+
+A typed fetch wrapper for all Nhost Function calls from the admin console. The base URL is your concrete Nhost Functions endpoint.
+
+```ts
+const FUNCTIONS_URL = process.env.NEXT_PUBLIC_FUNCTIONS_URL!
+// resolves to: https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run
+const ADMIN_BASE = `${FUNCTIONS_URL}/v1/admin`
+
+async function adminFetch<T>(
+  path: string,
+  options: RequestInit = {},
+  token: string
+): Promise<T> {
+  const res = await fetch(`${ADMIN_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...options.headers,
+    },
+  })
+  if (!res.ok) throw new Error(`Admin API error: ${res.status}`)
+  return res.json()
+}
+
+// Typed helpers — one per domain
+export const adminUsersApi = {
+  list:        (params, token) => adminFetch(`/users?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/users
+  get:         (userId, token) => adminFetch(`/users/${userId}`, {}, token),
+  suspend:     (userId, body, token) => adminFetch(`/users/${userId}/suspend`, { method: 'POST', body: JSON.stringify(body) }, token),
+  reactivate:  (userId, body, token) => adminFetch(`/users/${userId}/reactivate`, { method: 'POST', body: JSON.stringify(body) }, token),
+  ban:         (userId, body, token) => adminFetch(`/users/${userId}/ban`, { method: 'POST', body: JSON.stringify(body) }, token),
+  bulk:        (body, token) => adminFetch(`/users/bulk`, { method: 'POST', body: JSON.stringify(body) }, token),
+}
+
+export const adminPropertiesApi = {
+  list:             (params, token) => adminFetch(`/properties?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/properties
+  get:              (uuid, token)   => adminFetch(`/properties/${uuid}`, {}, token),
+  approve:          (uuid, body, token) => adminFetch(`/properties/${uuid}/approve`, { method: 'POST', body: JSON.stringify(body) }, token),
+  reject:           (uuid, body, token) => adminFetch(`/properties/${uuid}/reject`, { method: 'POST', body: JSON.stringify(body) }, token),
+  flag:             (uuid, body, token) => adminFetch(`/properties/${uuid}/flag`, { method: 'POST', body: JSON.stringify(body) }, token),
+  moderationQueue:  (params, token) => adminFetch(`/properties/moderation-queue?${new URLSearchParams(params)}`, {}, token),
+}
+
+export const adminOffersApi = {
+  incoming: (params, token) => adminFetch(`/offers/incoming?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/offers/incoming
+  list:     (params, token) => adminFetch(`/offers?${new URLSearchParams(params)}`, {}, token),
+}
+
+export const adminTransferApi = {
+  invite:  (body, token) => adminFetch(`/transfer-ownership/invite`, { method: 'POST', body: JSON.stringify(body) }, token),
+  resend:  (body, token) => adminFetch(`/transfer-ownership/resend`, { method: 'POST', body: JSON.stringify(body) }, token),
+  status:  (propertyUuid, token) => adminFetch(`/transfer-ownership/status?propertyUuid=${propertyUuid}`, {}, token),
+}
+
+export const adminAnalyticsApi = {
+  dashboard:  (params, token) => adminFetch(`/analytics/dashboard?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/analytics/dashboard
+  users:      (params, token) => adminFetch(`/analytics/users?${new URLSearchParams(params)}`, {}, token),
+  properties: (params, token) => adminFetch(`/analytics/properties?${new URLSearchParams(params)}`, {}, token),
+  export:     (body, token)   => adminFetch(`/analytics/export`, { method: 'POST', body: JSON.stringify(body) }, token),
+}
+
+export const adminPaymentsApi = {
+  list:    (params, token) => adminFetch(`/payments?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/payments
+  capture: (id, token)     => adminFetch(`/payments/${id}/capture`, { method: 'POST' }, token),
+  cancel:  (id, token)     => adminFetch(`/payments/${id}/cancel`, { method: 'POST' }, token),
+}
+
+export const adminUploadApi = {
+  // Single file — returns { uploadUrl (S3 presigned), s3Key, publicUrl }
+  presign: (file: { filename: string; mimeType: string }, token: string) =>
+    adminFetch(`/upload/presign`, { method: 'POST', body: JSON.stringify(file) }, token),
+  // → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/presign
+
+  // Batch — returns [{ uploadUrl, s3Key, publicUrl, filename }]
+  batch: (files: { filename: string; mimeType: string }[], token: string) =>
+    adminFetch(`/upload/batch`, { method: 'POST', body: JSON.stringify(files) }, token),
+  // → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/batch
+}
+```
+
+### Get the token in components
+
+```ts
+import { useAccessToken } from '@nhost/react'
+
+function MyAdminPage() {
+  const token = useAccessToken()
+  // pass token to adminFetch calls
+}
+```
+
+---
+
+## 11. Environment Variable Changes
+
+### Variables to REMOVE from admin console
+
+| Variable | Reason |
+|---|---|
+| `SDK_BACKEND_URL` | Direct Hasura calls replaced by Nhost Functions |
+| `HASURA_ADMIN_SECRET` | Server secret — move to Nhost Functions `.secrets` |
+| `HASURA_ENDPOINT` | Same — server-only |
+| `S3_BUCKET_ACCESS_KEY` | Move to Nhost Functions `.secrets` — S3 stays, credentials move server-side |
+| `S3_BUCKET_SECRET_KEY` | Move to Nhost Functions `.secrets` |
+| `S3_BUCKET_DOMAIN_URL` | Move to Nhost Functions `.secrets` |
+| `S3_BUCKET_AWS_REGION` | Move to Nhost Functions `.secrets` |
+| `S3_BUCKET_NAME` | Move to Nhost Functions `.secrets` |
+| `IMAGE_MAX_WIDTH` | Move to Nhost Function server-side constant |
+| `IMAGE_MAX_HEIGHT` | Move to Nhost Function server-side constant |
+| `IMAGE_WEBP_QUALITY` | Move to Nhost Function server-side constant |
+| `UPSTASH_REDIS_REST_URL` | Move to Nhost Functions `.secrets` |
+| `UPSTASH_REDIS_REST_TOKEN` | Move to Nhost Functions `.secrets` |
+| `JWT_SECRET` | Replaced by `NHOST_JWT_SECRET` |
+| `ROOT_EMAIL` | Legacy seed credential — not needed in frontend |
+| `ROOT_PASSWORD` | Same |
+| `NEXT_PUBLIC_API_URL` | Was pointing to old local API server |
+| `NEXT_PUBLIC_CLIENT_SECRET` | Review — if Airwallex-specific, keep; otherwise remove |
+| `AIRWALLEX_API_KEY` | **Move to Nhost Functions `.secrets`** — must not be in browser |
+
+### Variables to KEEP in admin console
+
+| Variable | Why kept |
+|---|---|
+| `NHOST_JWT_SECRET` | Used by `middleware.ts` for JWT verification |
+| `NEXT_PUBLIC_NHOST_SUBDOMAIN` | Used by `@nhost/nextjs` client |
+| `NEXT_PUBLIC_NHOST_REGION` | Used by `@nhost/nextjs` client |
+| `NEXT_PUBLIC_SITE_URL` | Redirect URLs for auth |
+| `NEXT_PUBLIC_AIRWALLEX_ENV` | Airwallex Elements (browser SDK) |
+| `AIRWALLEX_CLIENT_ID` | Airwallex Elements auth (browser-safe) |
+| `NEXT_PUBLIC_FUNCTIONS_URL` | **NEW** — base URL for all Nhost Function calls |
+
+### New variables to ADD to admin console `.env`
+
+```bash
+NEXT_PUBLIC_FUNCTIONS_URL=https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run
+```
+
+---
+
+## 12. Files to Delete
+
+These files are entirely replaced by Nhost Auth and Nhost Functions:
+
+```
+src/app/api/login/route.ts          ← replaced by nhost.auth.signIn()
+src/app/api/auth/check/route.ts     ← replaced by useAuthenticationStatus()
+src/app/api/auth/logout/route.ts    ← replaced by nhost.auth.signOut()
+```
+
+If any other server-side data fetching files are found during the full source audit (server components using `graphql-request` + admin secret), those must also be refactored to call Nhost Functions via `admin-api.ts`.
+
+---
+
+## 13. Files to Create / Modify
+
+### Create
+
+| File | Purpose |
+|---|---|
+| `src/lib/nhost.ts` | Nhost client instance |
+| `src/lib/admin-api.ts` | Typed fetch wrappers for all Nhost Function domains |
+
+### Modify
+
+| File | Change |
+|---|---|
+| `src/app/layout.tsx` | Add `NhostProvider` wrapping |
+| `src/context/AuthContext.tsx` | Replace session cookie logic with `useAuthenticationStatus()`, `useUserData()`, `nhost.auth.signIn()`, `nhost.auth.signOut()` |
+| `src/app/(auth)/signin/page.tsx` | Call `nhost.auth.signIn()` instead of `POST /api/login` |
+| All pages using direct Hasura queries | Replace `graphql-request` + admin secret with `adminFetch()` calls to Nhost Functions |
+| All pages using S3 upload | Replace direct S3 SDK calls with `adminUploadApi.presign()` or `adminUploadApi.batch()` — S3 credentials now live in Nhost Functions only |
+| `package.json` | Add `@nhost/nextjs @nhost/react`; remove `@aws-sdk/client-s3` (moves to Functions repo) |
+| `.env` | Remove vars listed in §11; add `NEXT_PUBLIC_FUNCTIONS_URL` |
+
+---
+
+## 14. Gaps Identified — Missing Nhost Functions
+
+The following functions are needed by the admin console but are **not in `dropiti-unified-backend-v2.md`**. These must be added in v3:
+
+| Missing Function | Route | Why needed |
+|---|---|---|
+| Airwallex payments list | `GET /v1/admin/payments` | `/payments` page |
+| Airwallex payment detail | `GET /v1/admin/payments/:id` | Payment detail view |
+| Airwallex payment capture | `POST /v1/admin/payments/:id/capture` | Payment action |
+| Airwallex payment cancel | `POST /v1/admin/payments/:id/cancel` | Payment action |
+| Airwallex payment intents list | `GET /v1/admin/payment-intents` | `/payment-intents` page |
+| Airwallex payment intent detail | `GET /v1/admin/payment-intents/:id` | Detail view |
+| Airwallex beneficiaries list | `GET /v1/admin/beneficiaries` | `/beneficiaries` page |
+| Airwallex beneficiary create | `POST /v1/admin/beneficiaries` | Create beneficiary |
+| Airwallex beneficiary delete | `DELETE /v1/admin/beneficiaries/:id` | Remove beneficiary |
+| Airwallex transfers list | `GET /v1/admin/transfers` | `/transfers` page |
+| Airwallex transfer create | `POST /v1/admin/transfers` | Initiate transfer |
+| Airwallex transfer status | `GET /v1/admin/transfers/:id` | Status polling |
+| Admin batch upload | `POST /v1/admin/upload/batch` | Media library bulk upload — generates S3 presigned URLs server-side |
+| Admin single upload presign | `POST /v1/admin/upload/presign` | Single file — generates S3 presigned URL server-side |
+| S3 lib helper | `functions/_lib/s3.ts` | Shared AWS S3 client using server-side credentials |
+
+---
+
+## 15. Decoupling Execution Order
+
+### Step 1 — Install Nhost packages
+```bash
+yarn add @nhost/nextjs @nhost/react
+# Do NOT remove @aws-sdk/client-s3 yet — it moves to the Functions repo, not deleted
+```
+
+### Step 2 — Create shared infra files
+- `src/lib/nhost.ts` — Nhost client
+- `src/lib/admin-api.ts` — typed fetch wrappers (stub all methods first)
+
+### Step 3 — Auth replacement (highest risk, do first in isolation)
+- Add `NhostProvider` to `src/app/layout.tsx`
+- Rewrite `AuthContext.tsx` to use Nhost hooks
+- Update `/signin` page to call `nhost.auth.signIn()`
+- Test login → dashboard redirect via existing `middleware.ts`
+- Test logout
+- **Delete** `src/app/api/login/route.ts`, `auth/check/route.ts`, `auth/logout/route.ts`
+
+### Step 4 — Deploy Nhost Functions (in parallel, different repo)
+- Ensure `GET /v1/health` is live
+- Deploy `admin/users/*` routes
+- Deploy `admin/properties/*` routes
+- Deploy `admin/offers/incoming` + `admin/transfer-ownership/*`
+- Deploy `admin/analytics/*`
+
+### Step 5 — Migrate pages one by one
+Order by dependency / risk:
+
+1. `/dashboard` → wire to `adminAnalyticsApi.dashboard()`
+2. `/properties` → wire to `adminPropertiesApi.list()` + `.moderationQueue()`
+3. `/customers` → wire to `adminUsersApi.list()` + `.get()`
+4. `/user-management` → wire to `adminUsersApi.*`
+5. `/transfers` → wire to `adminTransferApi.*`
+6. `/media-library` → wire to `adminUploadApi.presign()` and `adminUploadApi.batch()` (S3 presigned URLs, generated server-side in Nhost Function)
+7. `/settings` → wire to `admin/settings/*` Nhost Functions
+8. `/reports` → wire to `adminAnalyticsApi.*`
+9. `/payments`, `/payment-intents`, `/beneficiaries` → wire to new Airwallex proxy Functions (requires Step 6)
+
+### Step 6 — Deploy Airwallex proxy Nhost Functions
+- Implement `_lib/airwallex.ts` in Nhost Functions repo
+- Deploy `admin/payments/*`, `admin/payment-intents/*`, `admin/beneficiaries/*`, `admin/transfers/*`
+- Wire admin console pages
+
+### Step 7 — Upload migration
+- Add `@aws-sdk/client-s3` to `functions/package.json` (Nhost Functions repo)
+- Add `S3_BUCKET_*` vars to Nhost Functions `.secrets`
+- Implement `functions/admin/upload/presign.ts` + `functions/admin/upload/batch.ts`
+- Wire `react-dropzone` in media library to call `${ADMIN_API}/upload/presign` or `/upload/batch`
+- Remove `@aws-sdk/client-s3` from admin console `package.json` (now runs in Functions only)
+- Remove `S3_BUCKET_*` env vars from admin console `.env`
+
+### Step 8 — Env cleanup
+- Remove all deprecated env vars from `.env`
+- Add `NEXT_PUBLIC_FUNCTIONS_URL`
+- Move secrets (`AIRWALLEX_API_KEY`, `HASURA_ADMIN_SECRET`, Upstash) to Nhost Functions `.secrets`
+
+### Step 9 — Final audit
+- `grep -r "SDK_BACKEND_URL\|HASURA_ADMIN_SECRET\|/api/login\|/api/auth" src/` — must return 0 results
+- `grep -r "S3_BUCKET\|client-s3" src/` — must return 0 results (credentials and SDK now in Functions repo only)
+- `grep -r "graphql-request" src/` — should return 0 results (or only non-admin-secret usage)
+- Run full E2E test of all 11 protected routes
+
+---
+
+## 16. Verification Checklist
+
+After all steps are complete:
+
+- [ ] `GET /v1/health` returns `{ ok: true }` on Nhost Functions
+- [ ] Admin can log in via Nhost Auth; `nhost_access_token` cookie is set
+- [ ] `middleware.ts` correctly redirects unauthenticated users to `/signin`
+- [ ] `middleware.ts` correctly redirects authenticated users away from `/signin`
+- [ ] Non-admin JWT returns `403` on all `/v1/admin/*` Functions
+- [ ] `/dashboard` loads KPI data from `adminAnalyticsApi.dashboard()`
+- [ ] `/customers` lists users from `adminUsersApi.list()`
+- [ ] User suspend/reactivate/ban works
+- [ ] `/properties` moderation queue loads and approve/reject works
+- [ ] `/transfers` shows transfer list and invite flow works end-to-end
+- [ ] `/media-library` single upload works — calls `${ADMIN_API}/upload/presign`, PUT to S3 presigned URL
+- [ ] `/media-library` batch upload works — calls `${ADMIN_API}/upload/batch`, PUTs to S3 presigned URLs
+- [ ] S3 file URLs remain unchanged (`https://tastyplates-bucket.s3.ap-northeast-2.amazonaws.com/...`)
+- [ ] `/payments` loads via Airwallex proxy Function
+- [ ] `/payment-intents` loads via Airwallex proxy Function
+- [ ] `/beneficiaries` loads via Airwallex proxy Function
+- [ ] No `HASURA_ADMIN_SECRET` or `AIRWALLEX_API_KEY` visible in browser network tab
+- [ ] No `S3_BUCKET_*` env vars remain in admin console `.env` (they now live in Nhost Functions `.secrets`)
+- [ ] `src/app/api/` directory is empty or deleted
+- [ ] `@aws-sdk/client-s3` is not in admin console `package.json` (it now lives in Nhost Functions `package.json`)
+- [ ] Upstash rate limiting is working from Nhost Functions, not from admin console
+
+---
+
+*Decouple plan authored: May 2026. Review against final source audit before executing each step.*

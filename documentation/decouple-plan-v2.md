@@ -78,7 +78,7 @@ How each dependency is currently used and what replaces it after decoupling:
 | `graphql-request` | Direct Hasura queries from server components + API routes | **Keep** — admin console can continue querying Hasura directly with the Nhost JWT in the `Authorization` header. Remove admin secret usage from client. |
 | `jose` | JWT verify in `middleware.ts` | **Keep** — middleware is correct and stays unchanged |
 | `@airwallex/components-sdk` | Payments/transfers UI SDK | **Keep in frontend** — Airwallex calls go to a new Nhost Function (`admin/payments/*`) that proxies to Airwallex API server-side, keeping the API key off the client |
-| `@aws-sdk/client-s3` | S3 uploads from API routes | **Remove** — replaced by Nhost Storage SDK |
+| `@aws-sdk/client-s3` | S3 uploads from API routes | **Keep** — S3 remains the designated file store. Upload logic moves to a Nhost Function server-side; the SDK stays in the Functions repo, not the admin console frontend |
 | `react-dropzone` | Upload UI | **Keep** — UI component only, wire to new upload function |
 | `axios` | HTTP calls | **Keep** — used for Nhost Function calls |
 
@@ -197,9 +197,10 @@ const data = await client.request(GET_USERS_QUERY)
 
 **After (call Nhost Function with JWT):**
 ```ts
-const res = await fetch(`${process.env.NEXT_PUBLIC_FUNCTIONS_URL}/v1/admin/users`, {
-  headers: { Authorization: `Bearer ${nhost.auth.getAccessToken()}` }
-})
+const res = await fetch(
+  `https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/users`,
+  { headers: { Authorization: `Bearer ${nhost.auth.getAccessToken()}` } }
+)
 const { data } = await res.json()
 ```
 
@@ -209,84 +210,78 @@ const { data } = await res.json()
 
 ### Current state
 
-The admin console has `@aws-sdk/client-s3` in dependencies and `S3_BUCKET_*` env vars. The `react-dropzone` UI component is used for the media library drag-and-drop. Upload handling currently goes through a server component or API route that uses the AWS SDK directly.
+The admin console has `@aws-sdk/client-s3` in dependencies and `S3_BUCKET_*` env vars. The `react-dropzone` UI component is used for the media library drag-and-drop. Upload handling currently runs through a server component or API route that uses the AWS SDK directly — meaning the S3 credentials live in the admin frontend environment.
 
-### Target state — two scenarios
+### Target state — AWS S3 stays, but moves server-side
+
+**AWS S3 is the designated file store and does not change.** The only change is where the AWS SDK runs: it moves from the admin console frontend into a Nhost Function, so `S3_BUCKET_ACCESS_KEY` and `S3_BUCKET_SECRET_KEY` are never exposed to the browser.
+
+The admin console frontend calls the Nhost Function with the file. The Function handles S3 using its own server-side env vars and returns the final S3 URL.
 
 #### Scenario A: Single file upload (media library, property images)
 
-Replace with Nhost Storage directly from the client:
-
-```ts
-import { useNhostClient } from '@nhost/nextjs'
-
-function MediaUploader() {
-  const nhost = useNhostClient()
-
-  const handleDrop = async (acceptedFiles: File[]) => {
-    for (const file of acceptedFiles) {
-      const { fileMetadata, error } = await nhost.storage.upload({
-        file,
-        bucketId: 'admin-media',   // create this bucket in Nhost dashboard
-      })
-      if (error) console.error('Upload failed', error)
-      else console.log('Uploaded:', fileMetadata?.id)
-    }
-  }
-  // wire handleDrop to react-dropzone's onDrop prop
-}
 ```
+Admin console (browser)
+  → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/presign
+    Authorization: Bearer <nhost_access_token>
+    Body: { filename, mimeType }
+  ← { uploadUrl (S3 presigned PUT URL), s3Key, publicUrl }
+
+Admin console
+  → PUT <uploadUrl>   ← uploads file directly to S3
+```
+
+The Nhost Function (`admin/upload/presign.ts`) uses `@aws-sdk/client-s3` to generate an S3 presigned URL using server-side credentials, validates the MIME type, enforces size limits, and returns the URL. The admin console never touches S3 credentials.
 
 #### Scenario B: Batch upload (multiple files, e.g. bulk property images)
 
-For validated or rate-limited batch uploads, call the new Nhost Function:
-
-**New Nhost Function required:** `functions/admin/upload/batch.ts`
-
 ```
-POST /v1/admin/upload/batch
-Auth: requireAdminRole()
-Body: multipart or array of { filename, mimeType, bucketId }
-Returns: [{ fileId, uploadUrl }] — client uploads to each URL
-```
+Admin console (browser)
+  → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/batch
+    Authorization: Bearer <nhost_access_token>
+    Body: [{ filename, mimeType }, ...]
+  ← [{ uploadUrl, s3Key, publicUrl, filename }, ...]
 
-The client then iterates the returned presigned URLs and PUTs each file directly to Nhost Storage:
+Admin console
+  → PUT each uploadUrl in parallel   ← uploads files directly to S3
+```
 
 ```ts
+// admin console — batch upload wired to react-dropzone
+const ADMIN_API = 'https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin'
+
 const res = await fetch(`${ADMIN_API}/upload/batch`, {
   method: 'POST',
   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify(files.map(f => ({ filename: f.name, mimeType: f.type, bucketId: 'admin-media' })))
+  body: JSON.stringify(files.map(f => ({ filename: f.name, mimeType: f.type })))
 })
-const { data: presignedUrls } = await res.json()
+const { data: presignedItems } = await res.json()
 
 await Promise.all(
-  presignedUrls.map(({ uploadUrl }, i) =>
+  presignedItems.map(({ uploadUrl }: { uploadUrl: string }, i: number) =>
     fetch(uploadUrl, { method: 'PUT', body: files[i] })
   )
 )
+// Store presignedItems[i].publicUrl in Hasura against the property/media record
 ```
 
-#### Media library URL pattern after migration
+#### S3 URL pattern — unchanged
 
 ```ts
-// Current: S3 URL
-`https://tastyplates-bucket.s3.ap-northeast-2.amazonaws.com/${key}`
-
-// After: Nhost Storage URL
-`https://fcuycyemqprjrkbshlcj.storage.ap-southeast-1.nhost.run/v1/files/${fileId}`
-// or via nhost SDK:
-nhost.storage.getPublicUrl({ fileId })
+// URLs remain exactly as they are today:
+`https://tastyplates-bucket.s3.ap-northeast-2.amazonaws.com/${s3Key}`
+// The Nhost Function constructs this and returns it as publicUrl
 ```
 
-### S3 bucket migration checklist
+### Upload checklist
 
-- [ ] Create `admin-media` bucket in Nhost Storage (Nhost Dashboard → Storage)
-- [ ] Set bucket access policy (public read or signed URL — match existing S3 policy)
-- [ ] Migrate existing S3 files to Nhost Storage (one-time: download + re-upload or use `aws s3 sync` → then bulk upload to Nhost)
-- [ ] Update any stored S3 URLs in the database to Nhost Storage file IDs
-- [ ] Remove `@aws-sdk/client-s3` from `package.json`
-- [ ] Remove all `S3_BUCKET_*` env vars
+- [ ] Add `@aws-sdk/client-s3` to `functions/package.json` (Nhost Functions repo)
+- [ ] Add `S3_BUCKET_*` vars to Nhost Functions `.secrets` (move from admin console `.env`)
+- [ ] Implement `functions/admin/upload/presign.ts` (single file presigned URL)
+- [ ] Implement `functions/admin/upload/batch.ts` (multi-file presigned URLs)
+- [ ] Wire `react-dropzone` in admin console to call `${ADMIN_API}/upload/presign` or `/upload/batch`
+- [ ] Remove `@aws-sdk/client-s3` from admin console `package.json` (it moves to Functions repo)
+- [ ] Remove `S3_BUCKET_*` env vars from admin console `.env` (they move to Functions `.secrets`)
 
 ---
 
@@ -323,20 +318,20 @@ All these Functions use `requireAdminRole()` and make server-side calls to Airwa
 
 ---
 
-## 7. S3 Bucket Migration to Nhost Storage
+## 7. S3 — What Moves, What Stays
 
-Already covered in §5. Summary:
+AWS S3 remains the designated file store. No data migration is required. The only change is that S3 credentials move out of the admin console frontend and into Nhost Functions `.secrets`, where the AWS SDK runs server-side.
 
 | Item | Action |
 |---|---|
-| `@aws-sdk/client-s3` | Remove from `package.json` |
-| `S3_BUCKET_ACCESS_KEY` | Remove env var |
-| `S3_BUCKET_SECRET_KEY` | Remove env var |
-| `S3_BUCKET_DOMAIN_URL` | Remove env var |
-| `S3_BUCKET_AWS_REGION` | Remove env var |
-| `S3_BUCKET_NAME` | Remove env var |
-| `IMAGE_MAX_WIDTH`, `IMAGE_MAX_HEIGHT`, `IMAGE_WEBP_QUALITY` | Move to Nhost Function `admin/upload/batch.ts` as server-side constants |
-| Nhost Storage bucket `admin-media` | Create in Nhost dashboard |
+| `@aws-sdk/client-s3` in admin console | **Remove** — move to `functions/package.json` in the Nhost Functions repo |
+| `S3_BUCKET_ACCESS_KEY` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_SECRET_KEY` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_DOMAIN_URL` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_AWS_REGION` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `S3_BUCKET_NAME` | **Move** from admin console `.env` → Nhost Functions `.secrets` |
+| `IMAGE_MAX_WIDTH`, `IMAGE_MAX_HEIGHT`, `IMAGE_WEBP_QUALITY` | **Move** to Nhost Function `admin/upload/batch.ts` as server-side constants |
+| Existing S3 bucket + files | **No change** — same bucket, same URLs, nothing migrated |
 
 ---
 
@@ -386,11 +381,12 @@ The only thing that changes is how the `nhost_access_token` gets **set** — it 
 
 ### Create `src/lib/admin-api.ts`
 
-A typed fetch wrapper for all Nhost Function calls from the admin console. Replaces direct Hasura GraphQL calls and the three local API routes.
+A typed fetch wrapper for all Nhost Function calls from the admin console. The base URL is your concrete Nhost Functions endpoint.
 
 ```ts
 const FUNCTIONS_URL = process.env.NEXT_PUBLIC_FUNCTIONS_URL!
-const ADMIN_BASE    = `${FUNCTIONS_URL}/v1/admin`
+// resolves to: https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run
+const ADMIN_BASE = `${FUNCTIONS_URL}/v1/admin`
 
 async function adminFetch<T>(
   path: string,
@@ -412,6 +408,7 @@ async function adminFetch<T>(
 // Typed helpers — one per domain
 export const adminUsersApi = {
   list:        (params, token) => adminFetch(`/users?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/users
   get:         (userId, token) => adminFetch(`/users/${userId}`, {}, token),
   suspend:     (userId, body, token) => adminFetch(`/users/${userId}/suspend`, { method: 'POST', body: JSON.stringify(body) }, token),
   reactivate:  (userId, body, token) => adminFetch(`/users/${userId}/reactivate`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -421,6 +418,7 @@ export const adminUsersApi = {
 
 export const adminPropertiesApi = {
   list:             (params, token) => adminFetch(`/properties?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/properties
   get:              (uuid, token)   => adminFetch(`/properties/${uuid}`, {}, token),
   approve:          (uuid, body, token) => adminFetch(`/properties/${uuid}/approve`, { method: 'POST', body: JSON.stringify(body) }, token),
   reject:           (uuid, body, token) => adminFetch(`/properties/${uuid}/reject`, { method: 'POST', body: JSON.stringify(body) }, token),
@@ -429,8 +427,9 @@ export const adminPropertiesApi = {
 }
 
 export const adminOffersApi = {
-  incoming:    (params, token) => adminFetch(`/offers/incoming?${new URLSearchParams(params)}`, {}, token),
-  list:        (params, token) => adminFetch(`/offers?${new URLSearchParams(params)}`, {}, token),
+  incoming: (params, token) => adminFetch(`/offers/incoming?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/offers/incoming
+  list:     (params, token) => adminFetch(`/offers?${new URLSearchParams(params)}`, {}, token),
 }
 
 export const adminTransferApi = {
@@ -440,21 +439,30 @@ export const adminTransferApi = {
 }
 
 export const adminAnalyticsApi = {
-  dashboard:    (params, token) => adminFetch(`/analytics/dashboard?${new URLSearchParams(params)}`, {}, token),
-  users:        (params, token) => adminFetch(`/analytics/users?${new URLSearchParams(params)}`, {}, token),
-  properties:   (params, token) => adminFetch(`/analytics/properties?${new URLSearchParams(params)}`, {}, token),
-  export:       (body, token)   => adminFetch(`/analytics/export`, { method: 'POST', body: JSON.stringify(body) }, token),
+  dashboard:  (params, token) => adminFetch(`/analytics/dashboard?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/analytics/dashboard
+  users:      (params, token) => adminFetch(`/analytics/users?${new URLSearchParams(params)}`, {}, token),
+  properties: (params, token) => adminFetch(`/analytics/properties?${new URLSearchParams(params)}`, {}, token),
+  export:     (body, token)   => adminFetch(`/analytics/export`, { method: 'POST', body: JSON.stringify(body) }, token),
 }
 
 export const adminPaymentsApi = {
-  list:   (params, token) => adminFetch(`/payments?${new URLSearchParams(params)}`, {}, token),
-  capture: (id, token)    => adminFetch(`/payments/${id}/capture`, { method: 'POST' }, token),
-  cancel:  (id, token)    => adminFetch(`/payments/${id}/cancel`, { method: 'POST' }, token),
+  list:    (params, token) => adminFetch(`/payments?${new URLSearchParams(params)}`, {}, token),
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/payments
+  capture: (id, token)     => adminFetch(`/payments/${id}/capture`, { method: 'POST' }, token),
+  cancel:  (id, token)     => adminFetch(`/payments/${id}/cancel`, { method: 'POST' }, token),
 }
 
 export const adminUploadApi = {
-  presign: (files: { filename: string; mimeType: string }[], token: string) =>
+  // Single file — returns { uploadUrl (S3 presigned), s3Key, publicUrl }
+  presign: (file: { filename: string; mimeType: string }, token: string) =>
+    adminFetch(`/upload/presign`, { method: 'POST', body: JSON.stringify(file) }, token),
+  // → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/presign
+
+  // Batch — returns [{ uploadUrl, s3Key, publicUrl, filename }]
+  batch: (files: { filename: string; mimeType: string }[], token: string) =>
     adminFetch(`/upload/batch`, { method: 'POST', body: JSON.stringify(files) }, token),
+  // → POST https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/upload/batch
 }
 ```
 
@@ -478,13 +486,13 @@ function MyAdminPage() {
 | Variable | Reason |
 |---|---|
 | `SDK_BACKEND_URL` | Direct Hasura calls replaced by Nhost Functions |
-| `HASURA_ADMIN_SECRET` | Must not be in frontend — move to Nhost Functions `.secrets` |
+| `HASURA_ADMIN_SECRET` | Server secret — move to Nhost Functions `.secrets` |
 | `HASURA_ENDPOINT` | Same — server-only |
-| `S3_BUCKET_ACCESS_KEY` | AWS S3 removed |
-| `S3_BUCKET_SECRET_KEY` | AWS S3 removed |
-| `S3_BUCKET_DOMAIN_URL` | AWS S3 removed |
-| `S3_BUCKET_AWS_REGION` | AWS S3 removed |
-| `S3_BUCKET_NAME` | AWS S3 removed |
+| `S3_BUCKET_ACCESS_KEY` | Move to Nhost Functions `.secrets` — S3 stays, credentials move server-side |
+| `S3_BUCKET_SECRET_KEY` | Move to Nhost Functions `.secrets` |
+| `S3_BUCKET_DOMAIN_URL` | Move to Nhost Functions `.secrets` |
+| `S3_BUCKET_AWS_REGION` | Move to Nhost Functions `.secrets` |
+| `S3_BUCKET_NAME` | Move to Nhost Functions `.secrets` |
 | `IMAGE_MAX_WIDTH` | Move to Nhost Function server-side constant |
 | `IMAGE_MAX_HEIGHT` | Move to Nhost Function server-side constant |
 | `IMAGE_WEBP_QUALITY` | Move to Nhost Function server-side constant |
@@ -548,8 +556,8 @@ If any other server-side data fetching files are found during the full source au
 | `src/context/AuthContext.tsx` | Replace session cookie logic with `useAuthenticationStatus()`, `useUserData()`, `nhost.auth.signIn()`, `nhost.auth.signOut()` |
 | `src/app/(auth)/signin/page.tsx` | Call `nhost.auth.signIn()` instead of `POST /api/login` |
 | All pages using direct Hasura queries | Replace `graphql-request` + admin secret with `adminFetch()` calls to Nhost Functions |
-| All pages using S3 upload | Replace with `nhost.storage.upload()` or `adminUploadApi.presign()` |
-| `package.json` | Add `@nhost/nextjs @nhost/react`; remove `@aws-sdk/client-s3` |
+| All pages using S3 upload | Replace direct S3 SDK calls with `adminUploadApi.presign()` or `adminUploadApi.batch()` — S3 credentials now live in Nhost Functions only |
+| `package.json` | Add `@nhost/nextjs @nhost/react`; remove `@aws-sdk/client-s3` (moves to Functions repo) |
 | `.env` | Remove vars listed in §11; add `NEXT_PUBLIC_FUNCTIONS_URL` |
 
 ---
@@ -572,10 +580,9 @@ The following functions are needed by the admin console but are **not in `dropit
 | Airwallex transfers list | `GET /v1/admin/transfers` | `/transfers` page |
 | Airwallex transfer create | `POST /v1/admin/transfers` | Initiate transfer |
 | Airwallex transfer status | `GET /v1/admin/transfers/:id` | Status polling |
-| Admin batch upload | `POST /v1/admin/upload/batch` | Media library bulk upload |
-| Admin single upload presign | `POST /v1/admin/upload/presign` | Single file validated upload |
-| Upstash rate limit helper | `functions/_lib/ratelimit.ts` | Rate limiting for Airwallex proxy routes |
-| Airwallex env helper | `functions/_lib/airwallex.ts` | Shared Airwallex API client using server-side key |
+| Admin batch upload | `POST /v1/admin/upload/batch` | Media library bulk upload — generates S3 presigned URLs server-side |
+| Admin single upload presign | `POST /v1/admin/upload/presign` | Single file — generates S3 presigned URL server-side |
+| S3 lib helper | `functions/_lib/s3.ts` | Shared AWS S3 client using server-side credentials |
 
 ---
 
@@ -584,7 +591,7 @@ The following functions are needed by the admin console but are **not in `dropit
 ### Step 1 — Install Nhost packages
 ```bash
 yarn add @nhost/nextjs @nhost/react
-yarn remove @aws-sdk/client-s3   # remove S3 SDK
+# Do NOT remove @aws-sdk/client-s3 yet — it moves to the Functions repo, not deleted
 ```
 
 ### Step 2 — Create shared infra files
@@ -614,7 +621,7 @@ Order by dependency / risk:
 3. `/customers` → wire to `adminUsersApi.list()` + `.get()`
 4. `/user-management` → wire to `adminUsersApi.*`
 5. `/transfers` → wire to `adminTransferApi.*`
-6. `/media-library` → wire to `nhost.storage.upload()` + `adminUploadApi.presign()`
+6. `/media-library` → wire to `adminUploadApi.presign()` and `adminUploadApi.batch()` (S3 presigned URLs, generated server-side in Nhost Function)
 7. `/settings` → wire to `admin/settings/*` Nhost Functions
 8. `/reports` → wire to `adminAnalyticsApi.*`
 9. `/payments`, `/payment-intents`, `/beneficiaries` → wire to new Airwallex proxy Functions (requires Step 6)
@@ -625,10 +632,12 @@ Order by dependency / risk:
 - Wire admin console pages
 
 ### Step 7 — Upload migration
-- Create `admin-media` bucket in Nhost Storage
-- Migrate existing S3 files (one-time)
-- Wire media library upload UI to `nhost.storage.upload()`
-- Update stored S3 URLs in DB to Nhost Storage file IDs
+- Add `@aws-sdk/client-s3` to `functions/package.json` (Nhost Functions repo)
+- Add `S3_BUCKET_*` vars to Nhost Functions `.secrets`
+- Implement `functions/admin/upload/presign.ts` + `functions/admin/upload/batch.ts`
+- Wire `react-dropzone` in media library to call `${ADMIN_API}/upload/presign` or `/upload/batch`
+- Remove `@aws-sdk/client-s3` from admin console `package.json` (now runs in Functions only)
+- Remove `S3_BUCKET_*` env vars from admin console `.env`
 
 ### Step 8 — Env cleanup
 - Remove all deprecated env vars from `.env`
@@ -636,7 +645,8 @@ Order by dependency / risk:
 - Move secrets (`AIRWALLEX_API_KEY`, `HASURA_ADMIN_SECRET`, Upstash) to Nhost Functions `.secrets`
 
 ### Step 9 — Final audit
-- `grep -r "SDK_BACKEND_URL\|HASURA_ADMIN_SECRET\|S3_BUCKET\|/api/login\|/api/auth" src/` — must return 0 results
+- `grep -r "SDK_BACKEND_URL\|HASURA_ADMIN_SECRET\|/api/login\|/api/auth" src/` — must return 0 results
+- `grep -r "S3_BUCKET\|client-s3" src/` — must return 0 results (credentials and SDK now in Functions repo only)
 - `grep -r "graphql-request" src/` — should return 0 results (or only non-admin-secret usage)
 - Run full E2E test of all 11 protected routes
 
@@ -656,16 +666,17 @@ After all steps are complete:
 - [ ] User suspend/reactivate/ban works
 - [ ] `/properties` moderation queue loads and approve/reject works
 - [ ] `/transfers` shows transfer list and invite flow works end-to-end
-- [ ] `/media-library` single upload works via Nhost Storage
-- [ ] `/media-library` batch upload works via `adminUploadApi.presign()`
+- [ ] `/media-library` single upload works — calls `${ADMIN_API}/upload/presign`, PUT to S3 presigned URL
+- [ ] `/media-library` batch upload works — calls `${ADMIN_API}/upload/batch`, PUTs to S3 presigned URLs
+- [ ] S3 file URLs remain unchanged (`https://tastyplates-bucket.s3.ap-northeast-2.amazonaws.com/...`)
 - [ ] `/payments` loads via Airwallex proxy Function
 - [ ] `/payment-intents` loads via Airwallex proxy Function
 - [ ] `/beneficiaries` loads via Airwallex proxy Function
 - [ ] No `HASURA_ADMIN_SECRET` or `AIRWALLEX_API_KEY` visible in browser network tab
-- [ ] No `S3_BUCKET_*` env vars remain in `.env`
+- [ ] No `S3_BUCKET_*` env vars remain in admin console `.env` (they now live in Nhost Functions `.secrets`)
 - [ ] `src/app/api/` directory is empty or deleted
-- [ ] `@aws-sdk/client-s3` is not in `package.json`
-- [ ] `upstash` rate limiting is working from Nhost Functions, not from admin console
+- [ ] `@aws-sdk/client-s3` is not in admin console `package.json` (it now lives in Nhost Functions `package.json`)
+- [ ] Upstash rate limiting is working from Nhost Functions, not from admin console
 
 ---
 

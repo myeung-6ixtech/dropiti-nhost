@@ -147,3 +147,40 @@ export function getStorageBaseUrl(): string | undefined {
 export function getDefaultAdminMediaBucket(): string {
   return process.env.NHOST_STORAGE_ADMIN_BUCKET?.trim() || "admin-media";
 }
+
+export function getS3AccessKey(): string {
+  const k = process.env.S3_BUCKET_ACCESS_KEY;
+  if (!k?.trim()) throw new Error("Missing S3_BUCKET_ACCESS_KEY");
+  return k.trim();
+}
+
+export function getS3SecretKey(): string {
+  const k = process.env.S3_BUCKET_SECRET_KEY;
+  if (!k?.trim()) throw new Error("Missing S3_BUCKET_SECRET_KEY");
+  return k.trim();
+}
+
+export function getS3BucketName(): string {
+  const n = process.env.S3_BUCKET_NAME;
+  if (!n?.trim()) throw new Error("Missing S3_BUCKET_NAME");
+  return n.trim();
+}
+
+export function getS3Region(): string {
+  return (process.env.S3_BUCKET_AWS_REGION ?? "ap-northeast-2").trim();
+}
+
+/** Optional CDN or virtual-host base URL (no trailing slash). */
+export function getS3BucketDomainUrl(): string {
+  const u = process.env.S3_BUCKET_DOMAIN_URL?.trim();
+  if (u) return u.replace(/\/$/, "");
+  return "";
+}
+
+export function isS3Configured(): boolean {
+  return Boolean(
+    process.env.S3_BUCKET_ACCESS_KEY?.trim() &&
+      process.env.S3_BUCKET_SECRET_KEY?.trim() &&
+      process.env.S3_BUCKET_NAME?.trim()
+  );
+}

@@ -2,7 +2,8 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
-import { createPresignedUpload } from "../../_lib/nhost-storage";
+import { createS3PresignedPut } from "../../_lib/s3";
+import { isS3Configured } from "../../_lib/env";
 import {
   IMAGE_MAX_HEIGHT,
   IMAGE_MAX_WIDTH,
@@ -10,7 +11,6 @@ import {
   isAllowedMime,
   MAX_BATCH_UPLOAD_FILES,
 } from "../../_lib/upload-policy";
-import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
 
 const FileSchema = z.object({
@@ -30,6 +30,11 @@ export default async function adminUploadBatch(req: Request, res: Response): Pro
 
     const payload = await requireAdminRole(req, res);
     if (!payload) return;
+
+    if (!isS3Configured()) {
+      fail(res, "S3 upload is not configured", 503);
+      return;
+    }
 
     const adminId = getUserId(payload) ?? "unknown";
     if (!(await isAllowed(`upload:batch:${adminId}`, 10, 60))) {
@@ -52,10 +57,12 @@ export default async function adminUploadBatch(req: Request, res: Response): Pro
 
     const items = await Promise.all(
       parsed.data.map(async (file) => {
-        const presigned = await createPresignedUpload(file);
+        const presigned = await createS3PresignedPut(file);
         return {
           filename: file.filename,
           uploadUrl: presigned.uploadUrl,
+          s3Key: presigned.s3Key,
+          publicUrl: presigned.publicUrl,
           fileId: presigned.fileId,
         };
       })

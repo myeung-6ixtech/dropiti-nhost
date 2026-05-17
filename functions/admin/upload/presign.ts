@@ -2,7 +2,8 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
-import { createPresignedUpload } from "../../_lib/nhost-storage";
+import { createS3PresignedPut } from "../../_lib/s3";
+import { isS3Configured } from "../../_lib/env";
 import {
   IMAGE_MAX_HEIGHT,
   IMAGE_MAX_WIDTH,
@@ -28,6 +29,11 @@ export default async function adminUploadPresign(req: Request, res: Response): P
     const payload = await requireAdminRole(req, res);
     if (!payload) return;
 
+    if (!isS3Configured()) {
+      fail(res, "S3 upload is not configured", 503);
+      return;
+    }
+
     const adminId = getUserId(payload) ?? "unknown";
     if (!(await isAllowed(`upload:presign:${adminId}`, 60, 60))) {
       fail(res, "Rate limit exceeded", 429);
@@ -42,10 +48,15 @@ export default async function adminUploadPresign(req: Request, res: Response): P
       return;
     }
 
-    const presigned = await createPresignedUpload(body);
+    const presigned = await createS3PresignedPut({
+      filename: body.filename,
+      mimeType: body.mimeType,
+    });
 
     ok(res, {
       uploadUrl: presigned.uploadUrl,
+      s3Key: presigned.s3Key,
+      publicUrl: presigned.publicUrl,
       fileId: presigned.fileId,
       imageHints: {
         maxWidth: IMAGE_MAX_WIDTH,

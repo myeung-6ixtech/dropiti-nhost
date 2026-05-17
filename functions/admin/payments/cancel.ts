@@ -6,9 +6,10 @@ import { airwallex, AirwallexError, isAirwallexStubMode } from "../../_lib/airwa
 import { isAllowed } from "../../_lib/ratelimit";
 import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
+import { airwallexResourceId } from "../../_lib/admin-airwallex-handler";
 
 const Schema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1).optional(),
   cancellationReason: z.string().optional(),
 });
 
@@ -28,11 +29,27 @@ export default async function cancelPayment(req: Request, res: Response): Promis
       return;
     }
 
-    const body = validateBody(req, res, Schema);
+    const pathId = airwallexResourceId(req, {
+      paramName: "id",
+      pathPrefix: ["admin", "payments"],
+    });
+
+    const body = pathId
+      ? { cancellationReason: (req.body as { cancellationReason?: string })?.cancellationReason }
+      : validateBody(req, res, Schema);
     if (!body) return;
 
-    const result = await airwallex.payments.cancel(body.id, body.cancellationReason);
-    await logAdminAction(payload, "payments.cancel", "payment", body.id, body, req);
+    const id = pathId ?? (body as { id?: string }).id;
+    if (!id) {
+      fail(res, "id is required", 400);
+      return;
+    }
+
+    const result = await airwallex.payments.cancel(
+      id,
+      (body as { cancellationReason?: string }).cancellationReason
+    );
+    await logAdminAction(payload, "payments.cancel", "payment", id, body, req);
     ok(res, { ...result, stub: isAirwallexStubMode() });
   } catch (err) {
     if (err instanceof AirwallexError) {

@@ -4,6 +4,7 @@ import { isAllowed } from "./ratelimit";
 import { ok, fail } from "./respond";
 import { AirwallexError } from "./airwallex";
 import { isAirwallexStubMode } from "./airwallex";
+import { restResourceId } from "./rest-route";
 
 export async function withAdminAirwallex(
   req: Request,
@@ -49,4 +50,18 @@ export async function withAdminAirwallex(
 export function queryString(req: Request, key: string): string | undefined {
   const v = req.query[key];
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
+/** Airwallex resource id from path or legacy query. */
+export function airwallexResourceId(
+  req: Request,
+  opts: { queryKey?: string; pathPrefix: string[]; paramName?: string }
+): string | undefined {
+  return (
+    restResourceId(req, {
+      paramName: opts.paramName,
+      queryKey: opts.queryKey,
+      pathPrefix: opts.pathPrefix,
+    }) ?? undefined
+  );
 }

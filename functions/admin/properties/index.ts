@@ -39,6 +39,17 @@ export default async function adminPropertiesIndex(
   res: Response
 ): Promise<void> {
   try {
+    if (req.method === "POST") {
+      const create = (await import("./create-property")).default;
+      await create(req, res);
+      return;
+    }
+
+    if (req.method !== "GET") {
+      fail(res, "Method not allowed", 405);
+      return;
+    }
+
     const payload = await requireAdminRole(req, res);
     if (!payload) return;
 

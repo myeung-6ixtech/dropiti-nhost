@@ -98,20 +98,20 @@ All admin routes use `requireAdminRole()`. Mutating routes log to `admin_audit_l
 | Method | Path |
 |--------|------|
 | `GET` | `/v1/admin/offers/incoming` (+ `whatsappOutreachUrl` on items when `external_contact` set) |
-| `GET` | `/v1/admin/offers/incoming-detail?id=` |
+| `GET` | `/v1/admin/offers/incoming/:offerId` |
+| `GET` | `/v1/admin/offers/incoming-detail?id=` (legacy) |
 | `GET` | `/v1/admin/offers/index` |
 | `GET` | `/v1/admin/offers/get-offer?offerId=` |
 | `GET` | `/v1/admin/offers/stalled?daysSinceLastActivity=` |
 | `POST` | `/v1/admin/offers/remind`, `flag`, `cancel` |
 
-**Users**
+**Users** (REST + legacy action aliases)
 
 | Method | Path |
 |--------|------|
-| `GET` | `/v1/admin/users/index` (search via `?search=`) |
-| `GET` | `/v1/admin/users/get-all-users` (legacy alias) |
-| `GET` | `/v1/admin/users/get-user?userId=` |
-| `PUT`/`PATCH` | `/v1/admin/users/update-user` |
+| `GET` | `/v1/admin/users` (`?search=`, `?limit=`, `?offset=`) |
+| `GET` | `/v1/admin/users/:userId` |
+| `GET` | `/v1/admin/users/get-user?userId=` (legacy) |
 | `POST` | `/v1/admin/users/verify-user`, `suspend-user`, `reactivate-user`, `ban-user`, `bulk` |
 | `GET` | `/v1/admin/users/export-user-data?userId=` |
 | `DELETE` | `/v1/admin/users/delete-user-data` |
@@ -121,33 +121,50 @@ All admin routes use `requireAdminRole()`. Mutating routes log to `admin_audit_l
 
 | Method | Path |
 |--------|------|
-| `GET` | `/v1/admin/properties/index` |
-| `GET` | `/v1/admin/properties/get-property?propertyUuid=` |
+| `GET` | `/v1/admin/properties` |
+| `POST` | `/v1/admin/properties` (create) |
+| `GET` | `/v1/admin/properties/:propertyUuid` |
+| `PUT` | `/v1/admin/properties/:propertyUuid` |
+| `GET` | `/v1/admin/properties/get-property?propertyUuid=` (legacy) |
+| `PUT` | `/v1/admin/properties/update-property` (legacy) |
 | `GET` | `/v1/admin/properties/moderation-queue` |
-| `GET` | `/v1/admin/properties/reports?propertyUuid=` |
 | `POST` | `/v1/admin/properties/approve`, `reject`, `flag`, `feature`, `bulk` |
-| `PUT` | `/v1/admin/properties/update-property` |
+
+**Administrator users**
+
+| Method | Path |
+|--------|------|
+| `GET` | `/v1/admin/administrator-users/:id` |
+| `PUT` | `/v1/admin/administrator-users/:id` |
+| `DELETE` | `/v1/admin/administrator-users/:id` |
+| `GET` | `/v1/admin/administrator-users/get?id=` (legacy) |
 
 **Airwallex proxy (v3)** — server-side only; responses include `stub: true` when `AIRWALLEX_*` env is unset
 
 | Method | Path |
 |--------|------|
-| `GET` | `/v1/admin/payments` (list), `/v1/admin/payments/get-payment?id=` |
-| `POST` | `/v1/admin/payments/capture`, `/v1/admin/payments/cancel` |
-| `GET` | `/v1/admin/payment-intents`, `/v1/admin/payment-intents/get-intent?id=` |
-| `GET` | `/v1/admin/beneficiaries` |
-| `POST` | `/v1/admin/beneficiaries/create` |
-| `DELETE` | `/v1/admin/beneficiaries/delete?id=` |
-| `GET` | `/v1/admin/transfers` (Airwallex fund transfers) |
-| `POST` | `/v1/admin/transfers/create` |
-| `GET` | `/v1/admin/transfers/status?id=` |
+| `GET` | `/v1/admin/customers`, `/v1/admin/customers/:id` |
+| `PUT` | `/v1/admin/customers/:id` |
+| `DELETE` | `/v1/admin/customers/:id` |
+| `POST` | `/v1/admin/customers/:id/client-secret` |
+| `GET` | `/v1/admin/payment-intents`, `/v1/admin/payment-intents/:id` |
+| `PUT` | `/v1/admin/payment-intents/:id` |
+| `POST` | `/v1/admin/payments/:id/cancel` |
+| `POST` | `/v1/admin/payments/:id/attach-method` |
+| `GET` | `/v1/admin/beneficiaries`, `/v1/admin/beneficiaries/:id` |
+| `PUT` | `/v1/admin/beneficiaries/:id` |
+| `DELETE` | `/v1/admin/beneficiaries/:id` |
+| `GET` | `/v1/admin/transfers` |
+| `POST` | `/v1/admin/transfers/:id/cancel` |
 
-**Admin upload (v3)** — Nhost Storage presign; create `admin-media` bucket in dashboard
+Legacy action paths (`get-customer`, `payments/cancel`, etc.) remain as aliases during rollout.
+
+**Admin upload (v3)** — AWS S3 presigned PUT (`S3_BUCKET_*` in Functions secrets)
 
 | Method | Path |
 |--------|------|
-| `POST` | `/v1/admin/upload/presign` — body `{ filename, mimeType, bucketId? }` |
-| `POST` | `/v1/admin/upload/batch` — array of files, max 20 |
+| `POST` | `/v1/admin/upload/presign` — body `{ filename, mimeType }` → `{ uploadUrl, s3Key, publicUrl, fileId }` |
+| `POST` | `/v1/admin/upload/batch` — array of `{ filename, mimeType }`, max 20 |
 
 **Reviews, reports, analytics, settings, support, audit**
 
@@ -214,7 +231,8 @@ Use **`hasuraQuery`** from `functions/_lib/hasura.ts` with GraphQL documents at 
 **Secrets** (see `secrets/dotsecrets.example`):
 
 - v2: `DROPITI_CLIENT_ORIGIN`, `WHATSAPP_*`, `INVITATION_EXPIRY_DAYS`
-- v3: `AIRWALLEX_API_KEY`, `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_ENV` (`demo`|`prod`), `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NHOST_STORAGE_ADMIN_BUCKET` (default `admin-media`)
+- v3: `AIRWALLEX_API_KEY`, `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_ENV` (`demo`|`prod`), `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+- Upload: `S3_BUCKET_ACCESS_KEY`, `S3_BUCKET_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_BUCKET_AWS_REGION`, `S3_BUCKET_DOMAIN_URL`
 
 ## Related
 
