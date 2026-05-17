@@ -9,7 +9,7 @@ All function routes use the **`/v1/`** prefix plus the path derived from the fil
 
 ## Unified backend (client + admin)
 
-See [dropiti-unified-backend-v2.md](./dropiti-unified-backend-v2.md) (v2 spec) and [schema-v2-notes.md](./schema-v2-notes.md) (Hasura prerequisites).
+See [dropiti-unified-backend-v3.md](./dropiti-unified-backend-v3.md) (current spec), [dropiti-unified-backend-v2.md](./dropiti-unified-backend-v2.md), and [schema-v2-notes.md](./schema-v2-notes.md).
 
 | Namespace | On-disk | Example URL |
 |-----------|---------|-------------|
@@ -128,6 +128,27 @@ All admin routes use `requireAdminRole()`. Mutating routes log to `admin_audit_l
 | `POST` | `/v1/admin/properties/approve`, `reject`, `flag`, `feature`, `bulk` |
 | `PUT` | `/v1/admin/properties/update-property` |
 
+**Airwallex proxy (v3)** — server-side only; responses include `stub: true` when `AIRWALLEX_*` env is unset
+
+| Method | Path |
+|--------|------|
+| `GET` | `/v1/admin/payments` (list), `/v1/admin/payments/get-payment?id=` |
+| `POST` | `/v1/admin/payments/capture`, `/v1/admin/payments/cancel` |
+| `GET` | `/v1/admin/payment-intents`, `/v1/admin/payment-intents/get-intent?id=` |
+| `GET` | `/v1/admin/beneficiaries` |
+| `POST` | `/v1/admin/beneficiaries/create` |
+| `DELETE` | `/v1/admin/beneficiaries/delete?id=` |
+| `GET` | `/v1/admin/transfers` (Airwallex fund transfers) |
+| `POST` | `/v1/admin/transfers/create` |
+| `GET` | `/v1/admin/transfers/status?id=` |
+
+**Admin upload (v3)** — Nhost Storage presign; create `admin-media` bucket in dashboard
+
+| Method | Path |
+|--------|------|
+| `POST` | `/v1/admin/upload/presign` — body `{ filename, mimeType, bucketId? }` |
+| `POST` | `/v1/admin/upload/batch` — array of files, max 20 |
+
 **Reviews, reports, analytics, settings, support, audit**
 
 | Domain | Paths |
@@ -190,7 +211,10 @@ Use **`hasuraQuery`** from `functions/_lib/hasura.ts` with GraphQL documents at 
 - **Local:** repo-root **`.secrets`** file — copy from `secrets/dotsecrets.example` (`secrets/README.md`).
 - **Cloud:** Nhost Dashboard → Secrets; `nhost/nhost.toml` references `{{ secrets.HASURA_GRAPHQL_* }}` for Hasura.
 
-**v2 additions** (see `secrets/dotsecrets.example`): `DROPITI_CLIENT_ORIGIN`, `WHATSAPP_PROVIDER` (`stub`|`meta`|`twilio`), `WHATSAPP_API_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `INVITATION_EXPIRY_DAYS`.
+**Secrets** (see `secrets/dotsecrets.example`):
+
+- v2: `DROPITI_CLIENT_ORIGIN`, `WHATSAPP_*`, `INVITATION_EXPIRY_DAYS`
+- v3: `AIRWALLEX_API_KEY`, `AIRWALLEX_CLIENT_ID`, `AIRWALLEX_ENV` (`demo`|`prod`), `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`, `NHOST_STORAGE_ADMIN_BUCKET` (default `admin-media`)
 
 ## Related
 

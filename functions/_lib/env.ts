@@ -95,3 +95,55 @@ export function getClientAppOrigin(): string {
     "https://dropiti.com";
   return url.replace(/\/$/, "");
 }
+
+export type AirwallexEnvName = "demo" | "prod";
+
+export function getAirwallexApiKey(): string | undefined {
+  const k = process.env.AIRWALLEX_API_KEY;
+  return k && k.length > 0 ? k : undefined;
+}
+
+export function getAirwallexClientId(): string | undefined {
+  const id = process.env.AIRWALLEX_CLIENT_ID;
+  return id && id.length > 0 ? id : undefined;
+}
+
+export function getAirwallexEnv(): AirwallexEnvName {
+  const e = (process.env.AIRWALLEX_ENV ?? "demo").trim().toLowerCase();
+  return e === "prod" ? "prod" : "demo";
+}
+
+export function isAirwallexConfigured(): boolean {
+  return Boolean(getAirwallexApiKey() && getAirwallexClientId());
+}
+
+export function getUpstashRedisUrl(): string | undefined {
+  const u = process.env.UPSTASH_REDIS_REST_URL;
+  return u && u.length > 0 ? u : undefined;
+}
+
+export function getUpstashRedisToken(): string | undefined {
+  const t = process.env.UPSTASH_REDIS_REST_TOKEN;
+  return t && t.length > 0 ? t : undefined;
+}
+
+export function isUpstashConfigured(): boolean {
+  return Boolean(getUpstashRedisUrl() && getUpstashRedisToken());
+}
+
+/** Nhost Storage base URL for admin presigned uploads. */
+export function getStorageBaseUrl(): string | undefined {
+  const direct = process.env.NHOST_STORAGE_URL;
+  if (direct) return direct.replace(/\/$/, "");
+
+  const sub = process.env.NHOST_SUBDOMAIN;
+  const region = process.env.NHOST_REGION;
+  if (sub && region) {
+    return `https://${sub}.storage.${region}.nhost.run/v1`;
+  }
+  return undefined;
+}
+
+export function getDefaultAdminMediaBucket(): string {
+  return process.env.NHOST_STORAGE_ADMIN_BUCKET?.trim() || "admin-media";
+}
