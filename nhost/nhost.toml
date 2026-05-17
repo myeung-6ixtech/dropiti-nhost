@@ -5,6 +5,11 @@
 [functions.node]
 version = 22
 
+# Optional: comma-separated UUIDs for admin incoming-offers recipient filter (see _lib/admin-incoming-offers.ts)
+[[global.environment]]
+name = 'DROPITI_PLATFORM_LANDLORD_USER_IDS'
+value = ''
+
 [hasura]
 adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
 

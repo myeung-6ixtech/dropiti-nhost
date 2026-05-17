@@ -63,3 +63,35 @@ export function getAdminSecret(): string | undefined {
   const s = process.env.ADMIN_SECRET;
   return s && s.length > 0 ? s : undefined;
 }
+
+export type WhatsAppProviderName = "stub" | "meta" | "twilio";
+
+export function getWhatsAppProvider(): WhatsAppProviderName {
+  const p = (process.env.WHATSAPP_PROVIDER ?? "stub").trim().toLowerCase();
+  if (p === "meta" || p === "twilio") return p;
+  return "stub";
+}
+
+export function getWhatsAppApiToken(): string | undefined {
+  const t = process.env.WHATSAPP_API_TOKEN;
+  return t && t.length > 0 ? t : undefined;
+}
+
+export function getWhatsAppPhoneNumberId(): string | undefined {
+  const id = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  return id && id.length > 0 ? id : undefined;
+}
+
+export function getInvitationExpiryDays(): number {
+  const n = Number(process.env.INVITATION_EXPIRY_DAYS ?? "7");
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 7;
+}
+
+/** Client app origin for transfer-ownership invitation links. */
+export function getClientAppOrigin(): string {
+  const url =
+    process.env.DROPITI_CLIENT_ORIGIN ??
+    process.env.NEXT_PUBLIC_APP_URL ??
+    "https://dropiti.com";
+  return url.replace(/\/$/, "");
+}
