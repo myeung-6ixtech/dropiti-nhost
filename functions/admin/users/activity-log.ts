@@ -29,7 +29,7 @@ export default async function userActivityLog(req: Request, res: Response): Prom
     if (!payload) return;
     const userId = queryParam(req, "userId");
     if (!userId || !UUID_RE.test(userId)) { fail(res, "userId required", 400); return; }
-    const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 100);
+    const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
     const result = await hasuraQuery<{
       real_estate_admin_audit_logs?: unknown[];
     }>(LOGS, { userId, limit });

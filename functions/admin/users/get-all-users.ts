@@ -56,7 +56,7 @@ export default async function getAllUsers(req: Request, res: Response): Promise<
     const payload = await requireAdminRole(req, res);
     if (!payload) return;
 
-    const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 100);
+    const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
     const offset = Math.max(parseInt(String(req.query.offset ?? "0"), 10) || 0, 0);
 
     const result = await hasuraQuery<{

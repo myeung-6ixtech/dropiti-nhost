@@ -7,7 +7,7 @@ import { ok, fail } from "../../_lib/respond";
 
 const Schema = z.object({
   action: z.string(),
-  propertyUuids: z.array(z.string().uuid()).min(1).max(50),
+  propertyUuids: z.array(z.string().uuid()).min(1).max(20),
 });
 
 export default async function bulkProperties(req: Request, res: Response): Promise<void> {

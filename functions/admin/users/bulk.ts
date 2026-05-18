@@ -7,7 +7,7 @@ import { ok, fail } from "../../_lib/respond";
 
 const Schema = z.object({
   action: z.string().min(1),
-  userIds: z.array(z.string().uuid()).min(1).max(100),
+  userIds: z.array(z.string().uuid()).min(1).max(20),
   params: z.record(z.string(), z.unknown()).optional(),
 });
 

@@ -1,0 +1,43 @@
+v5 backend quality audit — implementation log
+================================================
+
+Phase 1 — §0.12 (dropiti-nhost/functions)
+-----------------------------------------
+1. npm run build: PASS
+2. Lambda anti-patterns grep: PASS (no hits)
+3. process.env outside _lib/env.ts: PASS (no hits)
+4. Hardcoded secrets in *.ts: PASS (optional-auth.ts matches "Bearer" in comments only)
+5. Direct Express res.json/send/status in route files: PASS (only _lib/* uses fetch Response)
+
+Additional: banned native deps in package.json — none.
+Renamed 8× `export default async function handler` to domain-specific names (settings, support, analytics, offers/cancel).
+
+BFF ↔ Nhost matrix (P0 fix)
+----------------------------
+Added collection GET rewrites in dropiti-admin-console-2/src/lib/bff-route-rewrite.ts:
+  admin/users|properties|customers|beneficiaries|transfers|payment-intents → …/<resource>/index
+
+Limits (§0.5)
+------------
+- _lib/admin-pagination.ts default limit 50 → 20
+- admin users/properties bulk max → 20
+- Inline list handlers previously default 50 → 20: properties/index, get-all-users, activity-log, offers/incoming, audit-logs/admin-activity, client/chat/get-room-messages
+
+Docs
+----
+- dropiti-unified-backend-v5.md §10 redacted (placeholders)
+- dropiti-nhost/documentation/api-guide.md: v5 canonical, BFF appendix, audit notes
+- §9 jwt note: jsonwebtoken (actual implementation)
+
+Smoke (cloud Functions URL, no auth where noted)
+-------------------------------------------------
+- GET /v1/health → 200 { ok: true, … }
+- GET /v1/admin/users → 401 Unauthorized (route reaches auth)
+- GET /v1/client/transfer-ownership/validate?token= → 400 token is required
+- GET /v1/admin/users/index → 500 "item not found" on sampled deploy (verify after deploy; BFF uses …/index for list)
+
+403 negative (user JWT on admin route): requires a real user token — run manually.
+
+Route inventory
+---------------
+139 *.ts files under functions/admin + functions/client; 0 bracket-named route files.

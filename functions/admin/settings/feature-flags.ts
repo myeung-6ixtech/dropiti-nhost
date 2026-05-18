@@ -7,7 +7,7 @@ import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
 
 /** GET /v1/admin/settings/feature-flags */
-export default async function handler(req: Request, res: Response): Promise<void> {
+export default async function adminSettingsFeatureFlags(req: Request, res: Response): Promise<void> {
   try {
     if (req.method !== "GET") {
       fail(res, "Method not allowed", 405);

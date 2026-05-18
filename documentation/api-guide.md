@@ -9,7 +9,7 @@ All function routes use the **`/v1/`** prefix plus the path derived from the fil
 
 ## Unified backend (client + admin)
 
-See [dropiti-unified-backend-v3.md](./dropiti-unified-backend-v3.md) (current spec), [dropiti-unified-backend-v2.md](./dropiti-unified-backend-v2.md), and [schema-v2-notes.md](./schema-v2-notes.md).
+**Canonical spec:** [dropiti-unified-backend-v5.md](./dropiti-unified-backend-v5.md) (Nhost API standard §0, route tables §7–§8). Older v2/v3 docs are historical.
 
 | Namespace | On-disk | Example URL |
 |-----------|---------|-------------|
@@ -17,9 +17,54 @@ See [dropiti-unified-backend-v3.md](./dropiti-unified-backend-v3.md) (current sp
 | Admin | `functions/admin/<domain>/<action>.ts` | `GET /v1/admin/offers/incoming` |
 | Ops | `functions/health.ts` | `GET /v1/health` |
 
+**Nhost static routing:** A file `functions/admin/users/index.ts` is served at **`GET /v1/admin/users/index`**, not `/v1/admin/users`. The admin console uses REST-style paths (`admin/users`, `admin/properties/:uuid`, …) and the Next.js BFF rewrites them to the correct static paths (see [Admin console BFF](#admin-console-bff-nextjs)).
+
 **Auth:** Protected routes require `Authorization: Bearer <nhost_access_token>`. Admin routes also require `"admin"` in JWT `x-hasura-allowed-roles` (see `_lib/auth.ts` `requireAdminRole`). Frontends must send the Bearer header when calling Functions on another origin — cookies are not forwarded automatically.
 
 **Frontend env:** `NEXT_PUBLIC_FUNCTIONS_URL` — e.g. `https://<subdomain>.functions.<region>.nhost.run` (no trailing slash).
+
+### Admin console BFF (Next.js)
+
+Source: [dropiti-admin-console-2/src/lib/bff-route-rewrite.ts](../dropiti-admin-console-2/src/lib/bff-route-rewrite.ts). The browser calls `/api/v1/bff/functions/<path>`; the BFF proxies to `NEXT_PUBLIC_FUNCTIONS_URL/v1/<rewritten-path>`.
+
+**Collection `GET` (adds `/index` segment for Nhost):**
+
+| Incoming path | Upstream `v1/…` path |
+|---------------|----------------------|
+| `GET admin/users` | `admin/users/index` |
+| `GET admin/properties` | `admin/properties/index` |
+| `GET admin/customers` | `admin/customers/index` |
+| `GET admin/beneficiaries` | `admin/beneficiaries/index` |
+| `GET admin/transfers` | `admin/transfers/index` |
+| `GET admin/payment-intents` | `admin/payment-intents/index` |
+| `GET admin/media` | `admin/media/index` |
+
+**Resource IDs and actions (examples):**
+
+| Incoming | Upstream |
+|----------|----------|
+| `GET admin/users/:userId` | `admin/users/get-user?userId=` |
+| `GET` / `PUT admin/properties/:uuid` | `get-property` / `update-property` |
+| `POST admin/properties` | `admin/properties/create-property` |
+| `GET admin/offers/incoming/:offerId` | `admin/offers/incoming-detail?id=` |
+| Airwallex REST paths | Legacy action segments (`get-customer`, `payments/cancel`, …) |
+
+The full matrix lives in `bff-route-rewrite.ts`.
+
+### v5 template compliance (audit notes)
+
+Automated §0.12 checks and smoke notes: [v5-audit-results.log](./v5-audit-results.log).
+
+**Intentional / known gaps vs [§0 templates](./dropiti-unified-backend-v5.md):**
+
+- **JWT:** Handlers use `jsonwebtoken` in `_lib/auth.ts` with HS256; v5 prose often cites `jose` — behavior is equivalent if secret parsing in `_lib/env.ts` stays aligned with Nhost-injected secrets.
+- **CORS / OPTIONS:** Most handlers rely on Nhost default CORS headers; v5 recommends explicit `OPTIONS` handling and `Access-Control-Allow-Methods` for non-GET. Consider a shared `_lib/cors.ts` when browsers call Functions directly from another origin.
+- **`req.invocationId` in logs:** Not yet used uniformly; v5 recommends including it in `console.error` for Nhost log correlation.
+- **Large exports:** `export-user-data` can return substantial JSON (e.g. nested lists); monitor size against the 6 MB Functions cap (§0.5).
+
+**List pagination defaults:** Shared helper `_lib/admin-pagination.ts` and individual list handlers use **default `limit` 20**, max **100**, per §0.5.
+
+**Bulk caps:** `admin/users/bulk` and `admin/properties/bulk` enforce **max 20** items per request; `admin/upload/batch` uses `_lib/upload-policy` **max 20** files.
 
 ## Routes (baseline)
 
@@ -112,7 +157,7 @@ All admin routes use `requireAdminRole()`. Mutating routes log to `admin_audit_l
 | `GET` | `/v1/admin/users` (`?search=`, `?limit=`, `?offset=`) |
 | `GET` | `/v1/admin/users/:userId` |
 | `GET` | `/v1/admin/users/get-user?userId=` (legacy) |
-| `POST` | `/v1/admin/users/verify-user`, `suspend-user`, `reactivate-user`, `ban-user`, `bulk` |
+| `POST` | `/v1/admin/users/verify-user`, `suspend-user`, `reactivate-user`, `ban-user`, `bulk` (max **20** user IDs) |
 | `GET` | `/v1/admin/users/export-user-data?userId=` |
 | `DELETE` | `/v1/admin/users/delete-user-data` |
 | `GET` | `/v1/admin/users/activity-log?userId=` |
@@ -128,7 +173,7 @@ All admin routes use `requireAdminRole()`. Mutating routes log to `admin_audit_l
 | `GET` | `/v1/admin/properties/get-property?propertyUuid=` (legacy) |
 | `PUT` | `/v1/admin/properties/update-property` (legacy) |
 | `GET` | `/v1/admin/properties/moderation-queue` |
-| `POST` | `/v1/admin/properties/approve`, `reject`, `flag`, `feature`, `bulk` |
+| `POST` | `/v1/admin/properties/approve`, `reject`, `flag`, `feature`, `bulk` (max **20** property UUIDs) |
 
 **Administrator users**
 

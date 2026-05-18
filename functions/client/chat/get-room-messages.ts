@@ -37,7 +37,7 @@ export default async function getRoomMessages(req: Request, res: Response): Prom
       return;
     }
 
-    const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 100);
+    const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
 
     const result = await hasuraQuery<{ real_estate_chat_message?: unknown[] }>(
       GET_MESSAGES,

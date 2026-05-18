@@ -23,7 +23,7 @@ export default async function adminActivity(req: Request, res: Response): Promis
     if (!payload) return;
     const adminId = queryParam(req, "adminId");
     if (!adminId) { fail(res, "adminId required", 400); return; }
-    const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 100);
+    const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
     const result = await hasuraQuery<{
       real_estate_admin_audit_logs?: unknown[];
     }>(ACTIVITY, { adminId, limit });

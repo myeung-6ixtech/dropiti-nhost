@@ -20,7 +20,7 @@ const MUTATION = `
   }
 `;
 
-export default async function handler(req: Request, res: Response): Promise<void> {
+export default async function cancelAdminOffer(req: Request, res: Response): Promise<void> {
   try {
     if (req.method !== "POST") { fail(res, "Method not allowed", 405); return; }
     const payload = await requireAdminRole(req, res);

@@ -18,7 +18,7 @@ export default async function incoming(req: Request, res: Response): Promise<voi
       return;
     }
 
-    const limit = Math.min(parseInt(String(req.query.limit ?? "50"), 10) || 50, 100);
+    const limit = Math.min(parseInt(String(req.query.limit ?? "20"), 10) || 20, 100);
     const offset = Math.max(parseInt(String(req.query.offset ?? "0"), 10) || 0, 0);
     const statusFilter =
       typeof req.query.status === "string" ? req.query.status.trim() || null : null;

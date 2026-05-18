@@ -7,7 +7,7 @@ import { ok, fail } from "../../_lib/respond";
 
 const Schema = z.object({ payload: z.record(z.string(), z.unknown()).optional() });
 
-export default async function handler(req: Request, res: Response): Promise<void> {
+export default async function analyticsExport(req: Request, res: Response): Promise<void> {
   try {
     if (req.method !== "POST") { fail(res, "Method not allowed", 405); return; }
     const auth = await requireAdminRole(req, res);
