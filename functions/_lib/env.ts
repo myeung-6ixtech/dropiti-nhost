@@ -184,3 +184,12 @@ export function isS3Configured(): boolean {
       process.env.S3_BUCKET_NAME?.trim()
   );
 }
+
+/** Platform landlord UUIDs for admin incoming-offers (comma-separated). */
+export function getDropitiPlatformLandlordUserIds(): string[] {
+  const raw = process.env.DROPITI_PLATFORM_LANDLORD_USER_IDS ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
