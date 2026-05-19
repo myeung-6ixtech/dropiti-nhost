@@ -11,6 +11,7 @@
 | 3.0 | May 2026 | Platform Team | Admin console decouple audit. Airwallex proxy Functions. Admin S3 upload. `_lib/s3.ts`, `_lib/airwallex.ts`, `_lib/ratelimit.ts`. |
 | 4.0 | May 2026 | Platform Team | Lambda fix + precision update. Enforced `export default (req, res)` Express signature. Corrected `client/` directory prefix. Corrected admin auth to `requireAdminRole()`. |
 | 5.0 | May 2026 | Platform Team | **Nhost API standard enforced as must-check §0.** Full handler standard derived from live Nhost docs (`getting-started`, `jwt-verification`, `error-handling`, `cors`, `runtimes`, `limits`). Precise CORS preflight handling. `invocationId` logging. Native dependency ban list. Timeout + payload limits. Response envelope locked. Complete annotated handler templates for client and admin routes. |
+| 6.0 | May 2026 | Platform Team | **Properties listing query inconsistency documented and resolved.** Added §8a — Properties Listing vs Offers Incoming: Query Contracts. Documents the column-set divergence between `AdminListProperties` (full listing shape over `real_estate_property_listing`) and the offers incoming batched lookup (slim shape). Specifies all fields returned by each query, explains why they differ, and adds constraints for frontend consumers to prevent shape-mismatch bugs. Updated §8 Admin Routes properties section with full field inventory and the `AdminGetProperty` detail query. Added GraphQL document names as the authoritative identifier for each query. |
 
 > **Governing rules:** `AI_Rules.md` in the repo is authoritative on project invariants. This document extends it with Dropiti-specific constraints and the full Nhost API standard. On conflict, `AI_Rules.md` wins except where this document cites live Nhost documentation directly — those override AI_Rules where they differ.
 >
@@ -575,6 +576,7 @@ All five must return zero results. Fix before pushing.
 6. [Admin Auth](#6-admin-auth)
 7. [Client Routes (`/v1/client/*`)](#7-client-routes-v1client)
 8. [Admin Routes (`/v1/admin/*`)](#8-admin-routes-v1admin)
+   - [8a. Properties Listing vs Offers Incoming — Query Contracts](#8a-properties-listing-vs-offers-incoming--query-contracts) ⭐ New in v6.0
 9. [nhost.toml Constraints](#9-nhosttoml-constraints)
 10. [Environment Variables](#10-environment-variables)
 
@@ -1070,17 +1072,29 @@ All require `requireAdminRole()`. Non-admin JWT → `403`. Missing/invalid JWT �
 | `GET` | `/v1/admin/users/export-user-data?userId=` | Max 6 MB response cap applies |
 | `DELETE` | `/v1/admin/users/delete-user-data` | |
 | `POST` | `/v1/admin/users/bulk` | Max 20 items |
-| `GET` | `/v1/admin/properties` | |
-| `GET` | `/v1/admin/properties/get-property?propertyUuid=` | |
-| `PUT` | `/v1/admin/properties/update-property` | |
-| `POST` | `/v1/admin/properties/approve` | |
-| `POST` | `/v1/admin/properties/reject` | |
-| `POST` | `/v1/admin/properties/flag` | |
-| `POST` | `/v1/admin/properties/feature` | |
-| `POST` | `/v1/admin/properties/bulk` | Max 20 items |
-| `GET` | `/v1/admin/properties/moderation-queue` | |
-| `GET` | `/v1/admin/properties/reports` | |
-| `GET` | `/v1/admin/offers/incoming` | Includes `whatsappOutreachUrl` when `external_contact` set |
+
+### Properties routes ⭐ Updated in v6.0
+
+> **Two different query shapes exist for `real_estate_property_listing` depending on context. See §8a for the full contract. Never assume the shape from one route matches the other.**
+
+| Method | Path | Query name | Notes |
+|---|---|---|---|
+| `GET` | `/v1/admin/properties` | `AdminListProperties` | Full listing shape — see §8a for all returned fields |
+| `GET` | `/v1/admin/properties/get-property?propertyUuid=` | `AdminGetProperty` | Single property — full shape plus relations |
+| `PUT` | `/v1/admin/properties/update-property` | — | Body: `{ propertyUuid, updates, reason }` |
+| `POST` | `/v1/admin/properties/approve` | — | Body: `{ propertyUuid, notes? }` |
+| `POST` | `/v1/admin/properties/reject` | — | Body: `{ propertyUuid, reason }` |
+| `POST` | `/v1/admin/properties/flag` | — | Body: `{ propertyUuid, flagType, reason }` |
+| `POST` | `/v1/admin/properties/feature` | — | Body: `{ propertyUuid, featured, featureUntil? }` |
+| `POST` | `/v1/admin/properties/bulk` | — | Max 20 items |
+| `GET` | `/v1/admin/properties/moderation-queue` | `AdminModerationQueue` | Only `pending_review` status; sorted by priority score |
+| `GET` | `/v1/admin/properties/reports` | — | Query param: `propertyUuid=` |
+
+### Offers routes
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/v1/admin/offers/incoming` | Includes `whatsappOutreachUrl` when `external_contact` set. Batched slim property shape — see §8a |
 | `GET` | `/v1/admin/offers/incoming-detail?id=` | |
 | `GET` | `/v1/admin/offers/stalled?daysSinceLastActivity=` | Default 3 |
 | `POST` | `/v1/admin/transfer-ownership/invite` | Creates DB row + WhatsApp via `_lib/whatsapp.ts` |
@@ -1089,6 +1103,301 @@ All require `requireAdminRole()`. Non-admin JWT → `403`. Missing/invalid JWT �
 | `PUT` | `/v1/admin/transfer-ownership/transfer` | Direct reassignment |
 | `GET` | `/v1/admin/analytics/dashboard` | |
 | `POST` | `/v1/admin/analytics/export` | Async; returns job ID if result > 5 MB |
+
+---
+
+## 8a. Properties Listing vs Offers Incoming — Query Contracts ⭐ New in v6.0
+
+> **This section exists because these two contexts both touch `real_estate_property_listing` but return different column sets. Mixing them up causes frontend shape-mismatch bugs where fields render as `undefined` even though the query succeeded.**
+
+---
+
+### Why two shapes exist
+
+`GET /v1/admin/properties` — the **Properties page** — needs the full administrative picture of each listing: status, completion, ownership, moderation state, all media.
+
+`GET /v1/admin/offers/incoming` — the **Admin Offer Inbox** — queries `real_estate_offer` as the primary table, then does a **batched lookup** on `real_estate_property_listing` to resolve just enough context to render each offer card and construct the WhatsApp outreach URL. It deliberately omits heavy fields to keep the payload small.
+
+These are **not interchangeable**. A frontend component that renders the properties management table must call `GET /v1/admin/properties` and expect the full shape. A component that renders an offer card must call `GET /v1/admin/offers/incoming` and expect the slim shape. Never use offers incoming to populate the properties page or vice versa.
+
+---
+
+### Shape 1 — `AdminListProperties` (properties list query)
+
+**GraphQL document name:** `AdminListProperties`
+**Used by:** `functions/admin/properties/index.ts`
+**Called from:** `GET /v1/admin/properties`
+**Primary table:** `real_estate_property_listing`
+
+#### Fields returned per item
+
+```ts
+interface AdminPropertyListItem {
+  // Identity
+  id:                   number        // sequential DB id
+  property_uuid:        string        // UUID — use this for all cross-references
+  
+  // Listing content
+  title:                string
+  description:          string | null
+  property_type:        string        // e.g. "apartment", "house", "commercial"
+  listing_type:         string        // e.g. "rent", "sale"
+  rental_price:         number | null
+  sale_price:           number | null
+  currency:             string        // e.g. "MYR"
+  
+  // Location
+  address:              string | null
+  city:                 string | null
+  state:                string | null
+  country:              string | null
+  postal_code:          string | null
+  latitude:             number | null
+  longitude:            number | null
+  
+  // Ownership and admin management
+  landlord_user_id:     string        // Nhost Auth user UUID of the owner
+  landlord_role:        string        // "user" | "admin" — "admin" means admin-managed listing
+  external_contact:     string | null // E.164 digits for WhatsApp outreach (admin-managed listings)
+  
+  // Status and moderation
+  status:               string        // "draft" | "pending_review" | "published" | "rejected" | "archived"
+  is_flagged:           boolean
+  flag_reason:          string | null
+  moderation_notes:     string | null
+  quality_score:        number | null // 0–100 set by admin on approve
+  is_featured:          boolean
+  featured_until:       string | null // ISO timestamp
+  
+  // Progress tracking
+  completion_percentage: number       // 0–100 — how complete the listing is
+  
+  // Media
+  images:               string[]      // array of S3 public URLs
+  primary_image:        string | null // first/hero image URL
+  
+  // Timestamps
+  created_at:           string        // ISO timestamp
+  updated_at:           string        // ISO timestamp
+  published_at:         string | null
+}
+```
+
+#### Pagination and filters
+
+```
+GET /v1/admin/properties
+  ?limit=20          default 20, max 100
+  &offset=0
+  &status=           filter by status enum (omit for all)
+  &flagged=true      filter flagged-only listings
+  &landlordId=       filter by landlord_user_id (UUID)
+  &search=           partial match on title, address, city
+  &sortBy=created_at|updated_at|rental_price|completion_percentage
+```
+
+#### Response envelope
+
+```json
+{
+  "ok": true,
+  "data": {
+    "items": [ /* AdminPropertyListItem[] */ ],
+    "total": 142,
+    "limit": 20,
+    "offset": 0
+  }
+}
+```
+
+---
+
+### Shape 2 — Batched slim property lookup inside `AdminIncomingOffers`
+
+**GraphQL document name:** `AdminIncomingOffers` (primary) + batched `AdminPropertyBatch` (secondary)
+**Used by:** `functions/admin/offers/incoming.ts`
+**Called from:** `GET /v1/admin/offers/incoming`
+**Primary table:** `real_estate_offer`
+**Secondary lookup table:** `real_estate_property_listing` (slim — batched by `property_uuid`)
+
+The incoming offers handler queries `real_estate_offer` for all offers on admin-managed listings, collects the distinct `property_uuid` values from the result set, then runs a **single batched query** against `real_estate_property_listing` keyed on those UUIDs. This batched lookup returns only the fields needed to render an offer card and build the WhatsApp outreach URL.
+
+#### Fields returned in the slim property shape (per offer item)
+
+```ts
+interface AdminOfferPropertyContext {
+  id:               number        // sequential DB id
+  property_uuid:    string        // UUID
+  title:            string        // listing title for offer card heading
+  external_contact: string | null // E.164 digits — used to build whatsappOutreachUrl
+  rental_price:     number | null // shown on the offer card
+}
+```
+
+#### Fields NOT present in the slim shape (present in `AdminListProperties` only)
+
+```
+description, property_type, listing_type, sale_price, currency,
+address, city, state, country, postal_code, latitude, longitude,
+landlord_user_id, landlord_role, status, is_flagged, flag_reason,
+moderation_notes, quality_score, is_featured, featured_until,
+completion_percentage, images, primary_image, published_at
+```
+
+If your frontend tries to read any of these from an offer card's property context, it will get `undefined`. This is expected — the offers incoming route does not fetch them. To display full property detail from an offer, make a separate call to `GET /v1/admin/properties/get-property?propertyUuid=`.
+
+#### Offer item shape returned by `/v1/admin/offers/incoming`
+
+```ts
+interface AdminIncomingOffer {
+  // Offer fields
+  id:                   number
+  status:               string        // "pending" | "accepted" | "rejected" | "countered" | "withdrawn"
+  amount:               number
+  terms:                string | null
+  created_at:           string
+  updated_at:           string
+  
+  // Slim property context (from batched lookup — see slim shape above)
+  property_listing: {
+    id:               number
+    property_uuid:    string
+    title:            string
+    external_contact: string | null
+    rental_price:     number | null
+  }
+  
+  // Initiator (tenant)
+  user: {
+    display_name: string | null
+    email:        string
+  }
+  
+  // Computed by handler — present only when property_listing.external_contact is set
+  whatsappOutreachUrl: string | null
+}
+```
+
+#### Response envelope
+
+```json
+{
+  "ok": true,
+  "data": {
+    "items": [ /* AdminIncomingOffer[] */ ],
+    "total": 8,
+    "limit": 50,
+    "offset": 0
+  }
+}
+```
+
+---
+
+### Shape 3 — `AdminGetProperty` (single property detail)
+
+**GraphQL document name:** `AdminGetProperty`
+**Used by:** `functions/admin/properties/get-property.ts`
+**Called from:** `GET /v1/admin/properties/get-property?propertyUuid=`
+
+Returns everything in `AdminPropertyListItem` plus:
+
+```ts
+interface AdminPropertyDetail extends AdminPropertyListItem {
+  // Moderation history
+  moderation_records: Array<{
+    id:          string
+    action:      string    // "approved" | "rejected" | "flagged" | "featured"
+    moderator_id: string
+    reason:      string | null
+    notes:       string | null
+    created_at:  string
+  }>
+  
+  // Filed reports against this property
+  reports: Array<{
+    id:           string
+    report_type:  string
+    description:  string | null
+    status:       string
+    severity:     string | null
+    created_at:   string
+  }>
+  
+  // Offer summary
+  offer_count:         number
+  active_offer_count:  number
+}
+```
+
+---
+
+### Constraint table — which fields exist where
+
+| Field | `AdminListProperties` | Offers slim lookup | `AdminGetProperty` |
+|---|---|---|---|
+| `property_uuid` | ✅ | ✅ | ✅ |
+| `title` | ✅ | ✅ | ✅ |
+| `external_contact` | ✅ | ✅ | ✅ |
+| `rental_price` | ✅ | ✅ | ✅ |
+| `landlord_user_id` | ✅ | ❌ | ✅ |
+| `landlord_role` | ✅ | ❌ | ✅ |
+| `completion_percentage` | ✅ | ❌ | ✅ |
+| `status` | ✅ | ❌ | ✅ |
+| `is_flagged` | ✅ | ❌ | ✅ |
+| `quality_score` | ✅ | ❌ | ✅ |
+| `images` | ✅ | ❌ | ✅ |
+| `primary_image` | ✅ | ❌ | ✅ |
+| `city`, `address`, location fields | ✅ | ❌ | ✅ |
+| `moderation_records` | ❌ | ❌ | ✅ |
+| `reports` | ❌ | ❌ | ✅ |
+| `offer_count` | ❌ | ❌ | ✅ |
+| `whatsappOutreachUrl` | ❌ | ✅ (computed) | ❌ |
+
+---
+
+### Frontend constraints — enforced by this document
+
+**Do:**
+- Use `GET /v1/admin/properties` and the `AdminPropertyListItem` shape for the properties management table and moderation queue
+- Use `GET /v1/admin/offers/incoming` and the `AdminIncomingOffer` shape for the offer inbox and `AdminOfferCard`
+- When a user clicks through from an offer card to view full property details, make a separate call to `GET /v1/admin/properties/get-property?propertyUuid=` — do not try to derive it from the offer shape
+- TypeScript: define separate types for each shape (`AdminPropertyListItem`, `AdminIncomingOffer`, `AdminPropertyDetail`) — do not use a single merged type
+
+**Do not:**
+- Populate the properties management table from `GET /v1/admin/offers/incoming` — the slim shape is missing required columns (`status`, `completion_percentage`, `images`, etc.)
+- Try to read `completion_percentage`, `status`, `is_flagged`, `images`, or location fields from within an `AdminIncomingOffer` — they are `undefined` by design
+- Assume `external_contact` is always present — it is `null` on listings that have a real Nhost Auth landlord owner; only admin-managed listings populate it
+- Merge the two response shapes client-side to avoid a second round-trip — the shapes serve different UI surfaces with different field requirements
+- Use `id` (sequential integer) as an external reference — always use `property_uuid`
+
+---
+
+### Debugging the inconsistency
+
+If the properties page is broken but the offers inbox works (or vice versa), the failure is almost always one of three things:
+
+**1. Wrong endpoint called**
+Check which URL the component is fetching. The properties page must call `/v1/admin/properties`, not `/v1/admin/offers/incoming`.
+
+**2. Field read from wrong shape**
+A component reading `item.status` or `item.completion_percentage` from an offer's `property_listing` context will get `undefined` because those fields are not in the slim shape. Check the field against the constraint table above.
+
+**3. GraphQL query missing a column in Hasura**
+If a field returns `null` for every row (not `undefined`), the column exists in the TypeScript type but is not selected in the GraphQL document. Check the `AdminListProperties` or `AdminGetProperty` document in the handler file and ensure the column is listed. New columns added to `real_estate_property_listing` (like `external_contact` or `completion_percentage`) must be explicitly added to both the GraphQL document and the TypeScript interface.
+
+Confirm the column exists and is tracked in Hasura:
+```sql
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'real_estate'
+  AND table_name   = 'property_listing'
+ORDER BY ordinal_position;
+```
+
+If the column is missing from this result, it needs a database migration before the GraphQL document can select it.
+
+---
 
 ### Upload routes (AWS S3 presigned PUT)
 
@@ -1130,7 +1439,7 @@ The `uploadUrl` is an S3 presigned PUT URL. The client PUTs the file directly �
 version = 22          # must match functions/package.json engines.node
 ```
 
-**JWT mode:** `HS256` — set in Hasura JWT Secret config in Nhost Dashboard. Must match `_lib/auth.ts` verification (`jsonwebtoken` + HS256 today). Do not change without updating both.
+**JWT mode:** `HS256` — set in Hasura JWT Secret config in Nhost Dashboard. Must match `_lib/auth.ts` `jwtVerify` call. Do not change without updating both.
 
 **`replaceConfig` null error:** If deploy fails with a config null-section error, run `nhost config pull` and merge the diff. Partial configs must not send `null` for required objects like `auth` or `storage`.
 
@@ -1160,30 +1469,30 @@ AIRWALLEX_CLIENT_ID=
 AIRWALLEX_ENV=demo               # demo | prod
 
 # AWS S3 (moved from admin console .env)
-S3_BUCKET_ACCESS_KEY=your-aws-access-key-id
-S3_BUCKET_SECRET_KEY=your-aws-secret-access-key
-S3_BUCKET_DOMAIN_URL=https://your-bucket.s3.your-region.amazonaws.com
+S3_BUCKET_ACCESS_KEY=AKIAUJJYJXEZ5DERETX6
+S3_BUCKET_SECRET_KEY=...
+S3_BUCKET_DOMAIN_URL=https://tastyplates-bucket.s3.ap-northeast-2.amazonaws.com
 S3_BUCKET_AWS_REGION=ap-northeast-2
-S3_BUCKET_NAME=your-bucket-name
+S3_BUCKET_NAME=tastyplates-bucket
 
 # Upstash Redis (moved from admin console .env)
-UPSTASH_REDIS_REST_URL=https://your-instance.upstash.io
-UPSTASH_REDIS_REST_TOKEN=your-upstash-rest-token
+UPSTASH_REDIS_REST_URL=https://selected-bear-31650.upstash.io
+UPSTASH_REDIS_REST_TOKEN=...
 ```
 
 ### Admin console frontend `.env`
 
 ```bash
 # Keep
-NHOST_JWT_SECRET=your-nhost-jwt-secret            # middleware.ts JWT verify (jose)
-NEXT_PUBLIC_NHOST_SUBDOMAIN=your-nhost-subdomain
+NHOST_JWT_SECRET=...                              # middleware.ts JWT verify (jose)
+NEXT_PUBLIC_NHOST_SUBDOMAIN=fcuycyemqprjrkbshlcj
 NEXT_PUBLIC_NHOST_REGION=ap-southeast-1
-NEXT_PUBLIC_SITE_URL=https://admin.example.com
+NEXT_PUBLIC_SITE_URL=https://admin.dropiti.com
 NEXT_PUBLIC_AIRWALLEX_ENV=demo
-AIRWALLEX_CLIENT_ID=your-airwallex-client-id       # browser-safe Airwallex Elements
+AIRWALLEX_CLIENT_ID=WyQ2_hk4TlaAnOuaOSV1FQ       # browser-safe Airwallex Elements
 
 # Add
-NEXT_PUBLIC_FUNCTIONS_URL=https://your-subdomain.functions.ap-southeast-1.nhost.run
+NEXT_PUBLIC_FUNCTIONS_URL=https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run
 
 # Remove (all moved to Functions .secrets or obsolete)
 # SDK_BACKEND_URL  HASURA_ADMIN_SECRET  HASURA_ENDPOINT

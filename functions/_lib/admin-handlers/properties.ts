@@ -13,11 +13,100 @@ const GET_PROPERTY = `
       where: { property_uuid: { _eq: $propertyUuid } }
       limit: 1
     ) {
-      id property_uuid title description status rental_price rental_price_currency
-      landlord_user_id external_contact completion_percentage created_at updated_at
+      id
+      property_uuid
+      title
+      description
+      address
+      rental_price
+      rental_price_currency
+      num_bedroom
+      num_bathroom
+      property_type
+      rental_space
+      show_specific_location
+      gross_area_size
+      gross_area_size_unit
+      furnished
+      pets_allowed
+      amenities
+      display_image
+      uploaded_images
+      status
+      landlord_user_id
+      external_contact
+      external_url
+      completion_percentage
+      availability_date
+      created_at
+      updated_at
     }
   }
 `;
+
+const GET_LANDLORD_BRIEF = `
+  query AdminGetLandlordBrief($userId: uuid!) {
+    real_estate_user(
+      where: { _or: [{ nhost_user_id: { _eq: $userId } }, { uuid: { _eq: $userId } }] }
+      limit: 1
+    ) {
+      nhost_user_id
+      uuid
+      email
+      display_name
+      first_name
+      last_name
+      photo_url
+    }
+  }
+`;
+
+const PROPERTY_OFFER_COUNTS = `
+  query AdminPropertyOfferCounts($propertyUuid: uuid!) {
+    all_offers: real_estate_offer_aggregate(
+      where: { property_uuid: { _eq: $propertyUuid } }
+    ) {
+      aggregate {
+        count
+      }
+    }
+    active_offers: real_estate_offer_aggregate(
+      where: { property_uuid: { _eq: $propertyUuid }, is_active: { _eq: true } }
+    ) {
+      aggregate {
+        count
+      }
+    }
+  }
+`;
+
+function mapLandlordBrief(row: Record<string, unknown>): {
+  id: string;
+  name: string | null;
+  email: string | null;
+  avatar: string | null;
+} {
+  const name =
+    (typeof row.display_name === "string" && row.display_name.trim()) ||
+    [row.first_name, row.last_name].filter(Boolean).join(" ") ||
+    null;
+  return {
+    id: String(row.nhost_user_id ?? row.uuid ?? ""),
+    email: (row.email as string | null) ?? null,
+    name,
+    avatar: (row.photo_url as string | null) ?? null,
+  };
+}
+
+function enrichAdminPropertyDetail(row: Record<string, unknown>): Record<string, unknown> {
+  const uploaded = row.uploaded_images;
+  return {
+    ...row,
+    currency: row.rental_price_currency ?? null,
+    primary_image: row.display_image ?? null,
+    images: Array.isArray(uploaded) ? uploaded : [],
+  };
+}
 
 const UpdateSchema = z.object({
   propertyUuid: z.string().uuid().optional(),
@@ -57,6 +146,10 @@ export async function handleAdminGetProperty(
     { propertyUuid }
   );
   if (result.errors?.length) {
+    console.error(
+      "[AdminGetProperty] Hasura:",
+      result.errors[0]?.message ?? result.errors
+    );
     fail(res, "Failed to load property", 500);
     return;
   }
@@ -65,7 +158,44 @@ export async function handleAdminGetProperty(
     fail(res, "Property not found", 404);
     return;
   }
-  ok(res, { property });
+
+  const row = property as Record<string, unknown>;
+  let offerCount = 0;
+  let activeOfferCount = 0;
+  const counts = await hasuraQuery<{
+    all_offers?: { aggregate?: { count?: number } };
+    active_offers?: { aggregate?: { count?: number } };
+  }>(PROPERTY_OFFER_COUNTS, { propertyUuid });
+  if (counts.errors?.length) {
+    console.error(
+      "[AdminGetProperty] offer counts:",
+      counts.errors[0]?.message ?? counts.errors
+    );
+  } else {
+    offerCount = counts.data?.all_offers?.aggregate?.count ?? 0;
+    activeOfferCount = counts.data?.active_offers?.aggregate?.count ?? 0;
+  }
+
+  const landlordUserId = row.landlord_user_id;
+  let landlord: ReturnType<typeof mapLandlordBrief> | null = null;
+  if (typeof landlordUserId === "string" && UUID_RE.test(landlordUserId)) {
+    const lr = await hasuraQuery<{ real_estate_user?: Record<string, unknown>[] }>(
+      GET_LANDLORD_BRIEF,
+      { userId: landlordUserId }
+    );
+    if (!lr.errors?.length) {
+      const u = lr.data?.real_estate_user?.[0];
+      if (u) landlord = mapLandlordBrief(u);
+    }
+  }
+
+  const enriched = enrichAdminPropertyDetail({
+    ...row,
+    offer_count: offerCount,
+    active_offer_count: activeOfferCount,
+  });
+
+  ok(res, { property: enriched, landlord });
 }
 
 export async function handleAdminUpdateProperty(

@@ -44,6 +44,8 @@ Frontend env var that must point to the cloud base URL (no trailing slash):
 NEXT_PUBLIC_FUNCTIONS_URL=https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run
 ```
 
+**Admin console (`dropiti-admin-console`):** the browser does not call this URL directly with `fetch`. It uses same-origin `GET|POST|… /api/v1/bff/functions/<path>`, which reads the httpOnly `nhost_access_token` cookie and proxies to `{NEXT_PUBLIC_FUNCTIONS_URL}/v1/<path>` with a Bearer header. REST-style paths (e.g. `admin/users/:id`) are rewritten to static Nhost paths before proxying. Implementation: `src/app/api/v1/bff/functions/[...path]/route.ts`, `src/lib/bff-route-rewrite.ts`, `src/lib/admin-api.ts`.
+
 ---
 
 ## 2. How Routing Works
