@@ -1,8 +1,8 @@
 import type { Request, Response } from "express";
-import { requireAdminRole } from "../../_lib/auth";
-import { hasuraQuery } from "../../_lib/hasura";
-import { UUID_RE } from "../../_lib/admin-offers-incoming";
-import { ok, fail } from "../../_lib/respond";
+import { requireAdminRole } from "../_lib/auth";
+import { hasuraQuery } from "../_lib/hasura";
+import { UUID_RE } from "../_lib/admin-offers-incoming";
+import { ok, fail } from "../_lib/respond";
 
 const LIST_PROPERTIES = `
   query AdminListProperties(
@@ -121,19 +121,14 @@ function enrichAdminPropertyListItem(row: Record<string, unknown>): Record<strin
 }
 
 /**
- * GET /v1/admin/properties/index
+ * GET /v1/admin/properties — AdminListProperties (v6 §8a).
+ * POST for create is routed by the BFF to /v1/admin/properties/create-property.
  */
-export default async function adminPropertiesIndex(
+export default async function adminPropertiesList(
   req: Request,
   res: Response
 ): Promise<void> {
   try {
-    if (req.method === "POST") {
-      const create = (await import("./create-property")).default;
-      await create(req, res);
-      return;
-    }
-
     if (req.method !== "GET") {
       fail(res, "Method not allowed", 405);
       return;
@@ -164,7 +159,7 @@ export default async function adminPropertiesIndex(
 
     if (result.errors?.length) {
       const first = result.errors[0]?.message ?? "unknown";
-      console.error("[admin/properties/index] Hasura:", first, result.errors);
+      console.error("[admin/properties] Hasura:", first, result.errors);
       const exposeHasura =
         process.env.NODE_ENV !== "production" ||
         process.env.DROPITI_EXPOSE_HASURA_ERRORS === "1";
@@ -198,7 +193,7 @@ export default async function adminPropertiesIndex(
       },
     });
   } catch (error) {
-    console.error("[admin/properties/index]", error);
+    console.error("[admin/properties]", error);
     fail(res, "Failed to list properties", 500);
   }
 }

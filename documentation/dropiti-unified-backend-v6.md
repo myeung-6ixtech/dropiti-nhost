@@ -1125,7 +1125,7 @@ These are **not interchangeable**. A frontend component that renders the propert
 ### Shape 1 — `AdminListProperties` (properties list query)
 
 **GraphQL document name:** `AdminListProperties`
-**Used by:** `functions/admin/properties/index.ts`
+**Used by:** `functions/admin/properties.ts`
 **Called from:** `GET /v1/admin/properties`
 **Primary table:** `real_estate_property_listing`
 
