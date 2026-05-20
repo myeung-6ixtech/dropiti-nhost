@@ -8,7 +8,7 @@ const LIST_PROPERTIES = `
   query AdminListProperties(
     $limit: Int!
     $offset: Int!
-    $where: real_estate_property_listing_bool_exp!
+    $where: real_estate_property_listing_bool_exp
     $order_by: [real_estate_property_listing_order_by!]!
   ) {
     real_estate_property_listing(
@@ -73,9 +73,10 @@ function parseSortOrder(req: Request): Record<string, string>[] {
 
 /**
  * Build Hasura `where` from v6-style query params (§8a).
- * @returns `{ where }` or `{ error: string }` for validation failures.
+ * Returns `null` when there are no predicates so Hasura treats the query as unfiltered
+ * (some engines mis-handle `$where: {}`).
  */
-function buildListWhere(req: Request): { where: Record<string, unknown> } | { error: string } {
+function buildListWhere(req: Request): { where: Record<string, unknown> | null } | { error: string } {
   const and: Record<string, unknown>[] = [];
 
   const status =
@@ -100,7 +101,7 @@ function buildListWhere(req: Request): { where: Record<string, unknown> } | { er
   }
 
   if (and.length === 0) {
-    return { where: {} };
+    return { where: null };
   }
   if (and.length === 1) {
     return { where: and[0] as Record<string, unknown> };
@@ -162,11 +163,19 @@ export default async function adminPropertiesIndex(
     });
 
     if (result.errors?.length) {
-      console.error(
-        "[admin/properties/index] Hasura:",
-        result.errors[0]?.message ?? result.errors
+      const first = result.errors[0]?.message ?? "unknown";
+      console.error("[admin/properties/index] Hasura:", first, result.errors);
+      const exposeHasura =
+        process.env.NODE_ENV !== "production" ||
+        process.env.DROPITI_EXPOSE_HASURA_ERRORS === "1";
+      fail(
+        res,
+        "Failed to list properties",
+        500,
+        exposeHasura
+          ? { hasuraMessages: result.errors.map((e) => e.message) }
+          : undefined
       );
-      fail(res, "Failed to list properties", 500);
       return;
     }
 
