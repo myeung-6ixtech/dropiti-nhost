@@ -21,7 +21,7 @@ Limits (§0.5)
 ------------
 - _lib/admin-pagination.ts default limit 50 → 20
 - admin users/properties bulk max → 20
-- Inline list handlers previously default 50 → 20: properties (list), get-all-users, activity-log, offers/incoming, audit-logs/admin-activity, client/chat/get-room-messages
+- Inline list handlers previously default 50 → 20: properties/list, get-all-users, activity-log, offers/incoming, audit-logs/admin-activity, client/chat/get-room-messages
 
 Docs
 ----

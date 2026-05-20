@@ -17,7 +17,7 @@ All function routes use the **`/v1/`** prefix plus the path derived from the fil
 | Admin | `functions/admin/<domain>/<action>.ts` | `GET /v1/admin/offers/incoming` |
 | Ops | `functions/health.ts` | `GET /v1/health` |
 
-**Nhost static routing:** A file `functions/admin/users/index.ts` is served at **`GET /v1/admin/users/index`**, not `/v1/admin/users`. The properties **list** is `functions/admin/properties.ts` → **`GET /v1/admin/properties`** (aligned with routes like `admin/offers/incoming`). Other actions stay under `functions/admin/properties/<action>.ts`. The admin console uses REST-style paths (`admin/users`, `admin/properties/:uuid`, …) and the Next.js BFF rewrites them when needed (see [Admin console BFF](#admin-console-bff-nextjs)).
+**Nhost static routing:** A file `functions/admin/users/index.ts` is served at **`GET /v1/admin/users/index`**, not `/v1/admin/users`. The properties **list** is `functions/admin/properties/list.ts` → **`GET /v1/admin/properties/list`**. The admin console BFF maps **`GET admin/properties`** → **`admin/properties/list`**. Other property actions stay under `functions/admin/properties/<action>.ts`. The admin console uses REST-style paths (`admin/users`, `admin/properties/:uuid`, …) and the Next.js BFF rewrites them when needed (see [Admin console BFF](#admin-console-bff-nextjs)).
 
 **Auth:** Protected routes require `Authorization: Bearer <nhost_access_token>`. Admin routes also require `"admin"` in JWT `x-hasura-allowed-roles` (see `_lib/auth.ts` `requireAdminRole`). Frontends must send the Bearer header when calling Functions on another origin — cookies are not forwarded automatically.
 
@@ -27,12 +27,12 @@ All function routes use the **`/v1/`** prefix plus the path derived from the fil
 
 Source: [dropiti-admin-console-2/src/lib/bff-route-rewrite.ts](../dropiti-admin-console-2/src/lib/bff-route-rewrite.ts). The browser calls `/api/v1/bff/functions/<path>`; the BFF proxies to `NEXT_PUBLIC_FUNCTIONS_URL/v1/<rewritten-path>`.
 
-**Collection `GET` (BFF adds `/index` for Nhost `…/index.ts` handlers; `GET admin/properties` is unchanged — see `functions/admin/properties.ts`):**
+**Collection `GET` (BFF adds `/index` for Nhost `…/index.ts` handlers; **`GET admin/properties`** is rewritten to **`admin/properties/list`**):**
 
 | Incoming path | Upstream `v1/…` path |
 |---------------|----------------------|
 | `GET admin/users` | `admin/users/index` |
-| `GET admin/properties` | *(no rewrite — Nhost `functions/admin/properties.ts`)* |
+| `GET admin/properties` | `admin/properties/list` |
 | `GET admin/customers` | `admin/customers/index` |
 | `GET admin/beneficiaries` | `admin/beneficiaries/index` |
 | `GET admin/transfers` | `admin/transfers/index` |
@@ -166,8 +166,8 @@ All admin routes use `requireAdminRole()`. Mutating routes log to `admin_audit_l
 
 | Method | Path |
 |--------|------|
-| `GET` | `/v1/admin/properties` |
-| `POST` | `/v1/admin/properties` (create) |
+| `GET` | `/v1/admin/properties/list` |
+| `POST` | `/v1/admin/properties/create-property` (create; BFF may accept `POST admin/properties`) |
 | `GET` | `/v1/admin/properties/:propertyUuid` |
 | `PUT` | `/v1/admin/properties/:propertyUuid` |
 | `GET` | `/v1/admin/properties/get-property?propertyUuid=` (legacy) |

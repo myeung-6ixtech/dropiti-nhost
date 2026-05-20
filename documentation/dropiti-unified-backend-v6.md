@@ -714,7 +714,8 @@ functions/
     │   ├── delete-user-data.ts
     │   └── bulk.ts
     ├── properties/
-    │   ├── index.ts
+    │   ├── list.ts
+    │   ├── create-property.ts
     │   ├── get-property.ts
     │   ├── update-property.ts
     │   ├── approve.ts
@@ -1079,7 +1080,7 @@ All require `requireAdminRole()`. Non-admin JWT → `403`. Missing/invalid JWT �
 
 | Method | Path | Query name | Notes |
 |---|---|---|---|
-| `GET` | `/v1/admin/properties` | `AdminListProperties` | Full listing shape — see §8a for all returned fields |
+| `GET` | `/v1/admin/properties/list` | `AdminListProperties` | Full listing shape — see §8a; **BFF:** `GET admin/properties` → this path |
 | `GET` | `/v1/admin/properties/get-property?propertyUuid=` | `AdminGetProperty` | Single property — full shape plus relations |
 | `PUT` | `/v1/admin/properties/update-property` | — | Body: `{ propertyUuid, updates, reason }` |
 | `POST` | `/v1/admin/properties/approve` | — | Body: `{ propertyUuid, notes? }` |
@@ -1114,19 +1115,19 @@ All require `requireAdminRole()`. Non-admin JWT → `403`. Missing/invalid JWT �
 
 ### Why two shapes exist
 
-`GET /v1/admin/properties` — the **Properties page** — needs the full administrative picture of each listing: status, completion, ownership, moderation state, all media.
+`GET /v1/admin/properties/list` (or **`GET admin/properties`** via the admin console BFF) — the **Properties page** — needs the full administrative picture of each listing: status, completion, ownership, moderation state, all media.
 
 `GET /v1/admin/offers/incoming` — the **Admin Offer Inbox** — queries `real_estate_offer` as the primary table, then does a **batched lookup** on `real_estate_property_listing` to resolve just enough context to render each offer card and construct the WhatsApp outreach URL. It deliberately omits heavy fields to keep the payload small.
 
-These are **not interchangeable**. A frontend component that renders the properties management table must call `GET /v1/admin/properties` and expect the full shape. A component that renders an offer card must call `GET /v1/admin/offers/incoming` and expect the slim shape. Never use offers incoming to populate the properties page or vice versa.
+These are **not interchangeable**. A frontend component that renders the properties management table must call `GET /v1/admin/properties/list` (or BFF `GET admin/properties`) and expect the full shape. A component that renders an offer card must call `GET /v1/admin/offers/incoming` and expect the slim shape. Never use offers incoming to populate the properties page or vice versa.
 
 ---
 
 ### Shape 1 — `AdminListProperties` (properties list query)
 
 **GraphQL document name:** `AdminListProperties`
-**Used by:** `functions/admin/properties.ts`
-**Called from:** `GET /v1/admin/properties`
+**Used by:** `functions/admin/properties/list.ts`  
+**Called from:** `GET /v1/admin/properties/list` (BFF: `GET admin/properties`)
 **Primary table:** `real_estate_property_listing`
 
 #### Fields returned per item
@@ -1186,7 +1187,7 @@ interface AdminPropertyListItem {
 #### Pagination and filters
 
 ```
-GET /v1/admin/properties
+GET /v1/admin/properties/list
   ?limit=20          default 20, max 100
   &offset=0
   &status=           filter by status enum (omit for all)
@@ -1359,7 +1360,7 @@ interface AdminPropertyDetail extends AdminPropertyListItem {
 ### Frontend constraints — enforced by this document
 
 **Do:**
-- Use `GET /v1/admin/properties` and the `AdminPropertyListItem` shape for the properties management table and moderation queue
+- Use `GET /v1/admin/properties/list` (or BFF `GET admin/properties`) and the `AdminPropertyListItem` shape for the properties management table and moderation queue
 - Use `GET /v1/admin/offers/incoming` and the `AdminIncomingOffer` shape for the offer inbox and `AdminOfferCard`
 - When a user clicks through from an offer card to view full property details, make a separate call to `GET /v1/admin/properties/get-property?propertyUuid=` — do not try to derive it from the offer shape
 - TypeScript: define separate types for each shape (`AdminPropertyListItem`, `AdminIncomingOffer`, `AdminPropertyDetail`) — do not use a single merged type
@@ -1378,7 +1379,7 @@ interface AdminPropertyDetail extends AdminPropertyListItem {
 If the properties page is broken but the offers inbox works (or vice versa), the failure is almost always one of three things:
 
 **1. Wrong endpoint called**
-Check which URL the component is fetching. The properties page must call `/v1/admin/properties`, not `/v1/admin/offers/incoming`.
+Check which URL the component is fetching. The properties page must call `/v1/admin/properties/list` (or BFF `admin/properties`), not `/v1/admin/offers/incoming`.
 
 **2. Field read from wrong shape**
 A component reading `item.status` or `item.completion_percentage` from an offer's `property_listing` context will get `undefined` because those fields are not in the slim shape. Check the field against the constraint table above.

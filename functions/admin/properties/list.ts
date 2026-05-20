@@ -1,8 +1,8 @@
 import type { Request, Response } from "express";
-import { requireAdminRole } from "../_lib/auth";
-import { hasuraQuery } from "../_lib/hasura";
-import { UUID_RE } from "../_lib/admin-offers-incoming";
-import { ok, fail } from "../_lib/respond";
+import { requireAdminRole } from "../../_lib/auth";
+import { hasuraQuery } from "../../_lib/hasura";
+import { UUID_RE } from "../../_lib/admin-offers-incoming";
+import { ok, fail } from "../../_lib/respond";
 
 const LIST_PROPERTIES = `
   query AdminListProperties(
@@ -121,8 +121,8 @@ function enrichAdminPropertyListItem(row: Record<string, unknown>): Record<strin
 }
 
 /**
- * GET /v1/admin/properties — AdminListProperties (v6 §8a).
- * POST for create is routed by the BFF to /v1/admin/properties/create-property.
+ * GET /v1/admin/properties/list — AdminListProperties (v6 §8a).
+ * Admin console BFF maps `GET admin/properties` → this path.
  */
 export default async function adminPropertiesList(
   req: Request,
@@ -159,7 +159,7 @@ export default async function adminPropertiesList(
 
     if (result.errors?.length) {
       const first = result.errors[0]?.message ?? "unknown";
-      console.error("[admin/properties] Hasura:", first, result.errors);
+      console.error("[admin/properties/list] Hasura:", first, result.errors);
       const exposeHasura =
         process.env.NODE_ENV !== "production" ||
         process.env.DROPITI_EXPOSE_HASURA_ERRORS === "1";
@@ -193,7 +193,7 @@ export default async function adminPropertiesList(
       },
     });
   } catch (error) {
-    console.error("[admin/properties]", error);
+    console.error("[admin/properties/list]", error);
     fail(res, "Failed to list properties", 500);
   }
 }

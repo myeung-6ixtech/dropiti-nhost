@@ -418,7 +418,7 @@ export const adminUsersApi = {
 
 export const adminPropertiesApi = {
   list:             (params, token) => adminFetch(`/properties?${new URLSearchParams(params)}`, {}, token),
-  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/properties
+  // → GET https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/properties/list
   get:              (uuid, token)   => adminFetch(`/properties/${uuid}`, {}, token),
   approve:          (uuid, body, token) => adminFetch(`/properties/${uuid}/approve`, { method: 'POST', body: JSON.stringify(body) }, token),
   reject:           (uuid, body, token) => adminFetch(`/properties/${uuid}/reject`, { method: 'POST', body: JSON.stringify(body) }, token),

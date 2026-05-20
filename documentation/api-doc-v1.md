@@ -1,8 +1,10 @@
 # Dropiti Nhost — Backend API Reference
 
-**Version:** 1.0 — May 2026
-**Repo:** `myeung-6ixtech/dropiti-nhost` · branch `main`
+**Version:** 2.0 — May 2026  
+**Repo:** `myeung-6ixtech/dropiti-nhost` · branch `main`  
 **Sourced from:** `documentation/api-guide.md`, `documentation/AI_Rules.md` (live, main branch)
+
+**Changes in 2.0 (from 1.0):** The admin **properties list** (`AdminListProperties`) is served at **`GET /v1/admin/properties/list`** (`functions/admin/properties/list.ts`), not `GET /v1/admin/properties` or `…/properties/index`. The admin console BFF rewrites **`GET admin/properties`** → **`admin/properties/list`** when proxying to Nhost. All other `/v1/admin/properties/*` action routes are unchanged.
 
 > This document describes how the deployed Nhost Functions work — their routing, authentication, request shape, response envelope, shared infrastructure, and constraints. It is written to be readable by both humans and AI code-generation tools. Every rule in this document reflects the actual implementation in the repository.
 
@@ -44,7 +46,7 @@ Frontend env var that must point to the cloud base URL (no trailing slash):
 NEXT_PUBLIC_FUNCTIONS_URL=https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run
 ```
 
-**Admin console (`dropiti-admin-console`):** the browser does not call this URL directly with `fetch`. It uses same-origin `GET|POST|… /api/v1/bff/functions/<path>`, which reads the httpOnly `nhost_access_token` cookie and proxies to `{NEXT_PUBLIC_FUNCTIONS_URL}/v1/<path>` with a Bearer header. REST-style paths (e.g. `admin/users/:id`) are rewritten to static Nhost paths before proxying. Implementation: `src/app/api/v1/bff/functions/[...path]/route.ts`, `src/lib/bff-route-rewrite.ts`, `src/lib/admin-api.ts`.
+**Admin console (`dropiti-admin-console`):** the browser does not call this URL directly with `fetch`. It uses same-origin `GET|POST|… /api/v1/bff/functions/<path>`, which reads the httpOnly `nhost_access_token` cookie and proxies to `{NEXT_PUBLIC_FUNCTIONS_URL}/v1/<path>` with a Bearer header. REST-style paths (e.g. `admin/users/:id`) are rewritten to static Nhost paths before proxying. **`GET admin/properties`** (collection list) is rewritten to **`admin/properties/list`**. Implementation: `src/app/api/v1/bff/functions/[...path]/route.ts`, `src/lib/bff-route-rewrite.ts`, `src/lib/admin-api.ts`.
 
 ---
 
@@ -67,6 +69,7 @@ functions/{path}.ts  →  {BASE_URL}/v1/{path}
 | `functions/client/users/create-user.ts` | `POST /v1/client/users/create-user` |
 | `functions/client/properties/get-listings.ts` | `GET /v1/client/properties/get-listings` |
 | `functions/admin/offers/incoming.ts` | `GET /v1/admin/offers/incoming` |
+| `functions/admin/properties/list.ts` | `GET /v1/admin/properties/list` |
 | `functions/admin/upload/batch.ts` | `POST /v1/admin/upload/batch` |
 | `functions/admin/support/tickets/index.ts` | `GET /v1/admin/support/tickets/index` |
 
@@ -713,10 +716,11 @@ Airwallex proxy routes return `{ ok: true, data: { stub: true, items: [] } }` wh
 
 | Method | Path | Request | Notes |
 |---|---|---|---|
-| `GET` | `/v1/admin/properties` | Query: `?status=&limit=&offset=&flagged=` | |
+| `GET` | `/v1/admin/properties/list` | Query: `?status=&landlordId=&search=&sortBy=&limit=&offset=` | `AdminListProperties` (v6 §8a). **BFF:** `GET admin/properties` → this path. |
 | `GET` | `/v1/admin/properties/get-property` | Query: `?propertyUuid=` | |
 | `PUT` | `/v1/admin/properties/update-property` | Body: `{ propertyUuid, updates, reason }` | |
 | `GET` | `/v1/admin/properties/moderation-queue` | Query: `?limit=&offset=` | Pending review queue |
+| `POST` | `/v1/admin/properties/create-property` | Body: create payload | **BFF:** `POST admin/properties` → this path |
 | `POST` | `/v1/admin/properties/approve` | Body: `{ propertyUuid, notes? }` | |
 | `POST` | `/v1/admin/properties/reject` | Body: `{ propertyUuid, reason }` | |
 | `POST` | `/v1/admin/properties/flag` | Body: `{ propertyUuid, flagType, reason }` | |
@@ -803,6 +807,10 @@ curl -sS "https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/hea
 curl -sS -H "Authorization: Bearer <USER_TOKEN>" \
   "https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/echo"
 
+# Admin properties list — must return 200 with a valid admin token
+curl -sS -H "Authorization: Bearer <ADMIN_TOKEN>" \
+  "https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/properties/list?limit=5"
+
 # Admin auth check — must return 403 with a non-admin user token
 curl -sS -H "Authorization: Bearer <USER_TOKEN>" \
   "https://fcuycyemqprjrkbshlcj.functions.ap-southeast-1.nhost.run/v1/admin/users"
@@ -810,4 +818,4 @@ curl -sS -H "Authorization: Bearer <USER_TOKEN>" \
 
 ---
 
-*api-doc v1.0 — May 2026. Sourced from `myeung-6ixtech/dropiti-nhost` main branch. Update when routes or `_lib/` contracts change.*
+*api-doc v2.0 — May 2026. Sourced from `myeung-6ixtech/dropiti-nhost` main branch. v1.0 listed `GET /v1/admin/properties` for the list; v2.0 uses `GET /v1/admin/properties/list` and documents the BFF rewrite. Update when routes or `_lib/` contracts change.*
