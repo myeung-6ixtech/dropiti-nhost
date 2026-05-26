@@ -4,6 +4,27 @@ import { hasuraQuery } from "../../_lib/hasura";
 import { parseListQuery, listEnvelope } from "../../_lib/admin-pagination";
 import { ok, fail } from "../../_lib/respond";
 
+/** Escape `%` and `_` for Postgres ILIKE via Hasura. */
+function escapeIlikePattern(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
+const MEDIA_FIELDS = `
+  id
+  s3_bucket
+  s3_key
+  public_url
+  sha256
+  etag
+  content_type
+  size_bytes
+  width
+  height
+  original_filename
+  created_at
+  updated_at
+`;
+
 const LIST_MEDIA = `
   query AdminListMedia($limit: Int!, $offset: Int!, $search: String!) {
     real_estate_media_assets(
@@ -21,19 +42,7 @@ const LIST_MEDIA = `
       offset: $offset
       order_by: { created_at: desc }
     ) {
-      id
-      s3_bucket
-      s3_key
-      public_url
-      sha256
-      etag
-      content_type
-      size_bytes
-      width
-      height
-      original_filename
-      created_at
-      updated_at
+      ${MEDIA_FIELDS}
     }
     real_estate_media_assets_aggregate(
       where: {
@@ -52,6 +61,26 @@ const LIST_MEDIA = `
   }
 `;
 
+const LIST_MEDIA_NO_SEARCH = `
+  query AdminListMedia($limit: Int!, $offset: Int!) {
+    real_estate_media_assets(
+      where: { deleted_at: { _is_null: true } }
+      limit: $limit
+      offset: $offset
+      order_by: { created_at: desc }
+    ) {
+      ${MEDIA_FIELDS}
+    }
+    real_estate_media_assets_aggregate(where: { deleted_at: { _is_null: true } }) {
+      aggregate { count }
+    }
+  }
+`;
+
+/**
+ * GET /v1/admin/media — list media assets (file: admin/media/index.ts).
+ * Admin console BFF: `GET admin/media` → this path (no `/index` suffix on Nhost).
+ */
 export default async function adminMediaIndex(req: Request, res: Response): Promise<void> {
   try {
     if (req.method !== "GET") {
@@ -62,15 +91,32 @@ export default async function adminMediaIndex(req: Request, res: Response): Prom
     if (!payload) return;
 
     const { limit, offset, search } = parseListQuery(req);
-    const searchPattern = search ? `%${search}%` : "%";
+    const variables: Record<string, unknown> = { limit, offset };
+    let query = LIST_MEDIA_NO_SEARCH;
+    if (search) {
+      query = LIST_MEDIA;
+      variables.search = `%${escapeIlikePattern(search)}%`;
+    }
 
     const result = await hasuraQuery<{
       real_estate_media_assets?: unknown[];
       real_estate_media_assets_aggregate?: { aggregate?: { count?: number } };
-    }>(LIST_MEDIA, { limit, offset, search: searchPattern });
+    }>(query, variables);
 
     if (result.errors?.length) {
-      fail(res, "Failed to list media", 500);
+      const first = result.errors[0]?.message ?? "unknown";
+      console.error("[admin/media/index] Hasura:", first, result.errors);
+      const exposeHasura =
+        process.env.NODE_ENV !== "production" ||
+        process.env.DROPITI_EXPOSE_HASURA_ERRORS === "1";
+      fail(
+        res,
+        "Failed to list media",
+        500,
+        exposeHasura
+          ? { hasuraMessages: result.errors.map((e) => e.message) }
+          : undefined
+      );
       return;
     }
 

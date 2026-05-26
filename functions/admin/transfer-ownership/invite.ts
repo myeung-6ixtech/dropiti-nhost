@@ -21,6 +21,8 @@ const InviteSchema = z.object({
   propertyUuid: z.string().uuid(),
   externalContact: z.string().optional(),
   offerId: z.string().optional(),
+  /** When true, skip Meta template WhatsApp (admin sends link manually via wa.me). */
+  skipWhatsApp: z.boolean().optional(),
 });
 
 export default async function inviteTransferOwnership(
@@ -95,24 +97,31 @@ export default async function inviteTransferOwnership(
 
     const invitationUrl = buildInvitationUrl(invitation.token_uuid);
     const expiryDays = getInvitationExpiryDays();
+    const skipWhatsApp = body.skipWhatsApp === true;
 
-    const waResult = await sendOwnershipInvitation(phoneTarget, {
-      propertyTitle: property.title,
-      invitationUrl,
-      expiryDays,
-    });
+    let waResult: { success: boolean; messageId?: string; error?: string };
+    if (skipWhatsApp) {
+      waResult = { success: false };
+    } else {
+      waResult = await sendOwnershipInvitation(phoneTarget, {
+        propertyTitle: property.title,
+        invitationUrl,
+        expiryDays,
+      });
 
-    if (waResult.messageId) {
-      await hasuraQuery(UPDATE_MESSAGE_ID, {
-        id: invitation.id,
-        messageId: waResult.messageId,
-      }).catch((err) => console.error("[admin/transfer-ownership/invite] message id", err));
+      if (waResult.messageId) {
+        await hasuraQuery(UPDATE_MESSAGE_ID, {
+          id: invitation.id,
+          messageId: waResult.messageId,
+        }).catch((err) => console.error("[admin/transfer-ownership/invite] message id", err));
+      }
     }
 
     await logAdminAction(payload, "transfer_ownership.invite", "property", body.propertyUuid, {
       invitationId: invitation.id,
       offerId: body.offerId,
       whatsappSent: waResult.success,
+      skipWhatsApp,
     }, req);
 
     ok(res, {
@@ -121,7 +130,8 @@ export default async function inviteTransferOwnership(
       invitationUrl,
       expiresAt: invitation.expires_at,
       whatsappSent: waResult.success,
-      whatsappError: waResult.error ?? null,
+      whatsappSkipped: skipWhatsApp,
+      whatsappError: skipWhatsApp ? null : (waResult.error ?? null),
       location: extractLocation(property.address),
     });
   } catch (error) {

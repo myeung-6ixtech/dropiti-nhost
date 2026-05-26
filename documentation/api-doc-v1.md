@@ -70,6 +70,7 @@ functions/{path}.ts  →  {BASE_URL}/v1/{path}
 | `functions/client/properties/get-listings.ts` | `GET /v1/client/properties/get-listings` |
 | `functions/admin/offers/incoming.ts` | `GET /v1/admin/offers/incoming` |
 | `functions/admin/properties/list.ts` | `GET /v1/admin/properties/list` |
+| `functions/admin/media/index.ts` | `GET /v1/admin/media` |
 | `functions/admin/upload/batch.ts` | `POST /v1/admin/upload/batch` |
 | `functions/admin/support/tickets/index.ts` | `GET /v1/admin/support/tickets/index` |
 
@@ -84,7 +85,7 @@ functions/{path}.ts  →  {BASE_URL}/v1/{path}
 ### ❌ Do NOT
 
 - Create a `functions/v1/` directory — produces `/v1/v1/...`
-- Expect `index.ts` to answer a directory URL — `functions/admin/users/index.ts` answers `/v1/admin/users/index`, not `/v1/admin/users`
+- Do **not** call `/v1/admin/<domain>/index` for `index.ts` handlers — `functions/admin/users/index.ts` is served at **`GET /v1/admin/users`**. The admin BFF passes `GET admin/users` through unchanged.
 - Use `PascalCase` or `snake_case` in file/directory names — use `kebab-case` only
 - Put more than one `export default` handler in a file
 - Import one route handler from another route handler
@@ -678,9 +679,9 @@ Airwallex proxy routes return `{ ok: true, data: { stub: true, items: [] } }` wh
 
 | Method | Path | Request | Notes |
 |---|---|---|---|
-| `POST` | `/v1/admin/transfer-ownership/invite` | Body: `{ propertyUuid, externalContact?, offerId? }` | Creates DB row + sends WhatsApp |
-| `POST` | `/v1/admin/transfer-ownership/resend` | Body: `{ propertyUuid }` | Cancels old token, creates new, resends WhatsApp |
-| `GET` | `/v1/admin/transfer-ownership/status` | Query: `?propertyUuid=` | For `AdminOfferCard` badge state |
+| `POST` | `/v1/admin/transfer-ownership/invite` | Body: `{ propertyUuid, externalContact?, offerId?, skipWhatsApp? }` | Creates DB row; sends Meta template WhatsApp unless `skipWhatsApp: true` |
+| `POST` | `/v1/admin/transfer-ownership/resend` | Body: `{ propertyUuid, externalContact?, skipWhatsApp? }` | Cancels old token, creates new; resends WhatsApp unless `skipWhatsApp: true` |
+| `GET` | `/v1/admin/transfer-ownership/status` | Query: `?propertyUuid=` | Latest invitation; `data.invitationUrl` when `hasInvitation` (client app claim link) |
 | `PUT` | `/v1/admin/transfer-ownership/transfer` | Body: `{ propertyUuid, newOwnerId }` | Direct reassignment without invite flow |
 
 ### Offers
@@ -700,7 +701,7 @@ Airwallex proxy routes return `{ ok: true, data: { stub: true, items: [] } }` wh
 
 | Method | Path | Request | Notes |
 |---|---|---|---|
-| `GET` | `/v1/admin/users` | Query: `?search=&limit=&offset=&status=` | |
+| `GET` | `/v1/admin/users` | Query: `?search=&limit=&offset=&defaultRole=&excludeDefaultRole=` | Filter `user_profile.defaultRole` (`defaultRole=admin` → user-management; `defaultRole=user` → app-customers) |
 | `GET` | `/v1/admin/users/get-user` | Query: `?userId=` | |
 | `PUT` | `/v1/admin/users/update-user` | Body: user fields | |
 | `POST` | `/v1/admin/users/verify-user` | Body: `{ userId, verificationType, status, notes }` | |
@@ -726,6 +727,12 @@ Airwallex proxy routes return `{ ok: true, data: { stub: true, items: [] } }` wh
 | `POST` | `/v1/admin/properties/flag` | Body: `{ propertyUuid, flagType, reason }` | |
 | `POST` | `/v1/admin/properties/feature` | Body: `{ propertyUuid, featured, featureUntil? }` | |
 | `POST` | `/v1/admin/properties/bulk` | Body: `{ action, propertyUuids }` | Max 20 |
+
+### Media library
+
+| Method | Path | Request | Notes |
+|---|---|---|---|
+| `GET` | `/v1/admin/media` | Query: `?limit=&offset=&search=` | Lists `real_estate_media_assets` (non-deleted). **File:** `functions/admin/media/index.ts`. **BFF:** `GET admin/media` → this path (no `/index` suffix). |
 
 ### Upload (admin — AWS S3 presigned PUT)
 

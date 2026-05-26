@@ -20,6 +20,8 @@ import {
 const ResendSchema = z.object({
   propertyUuid: z.string().uuid(),
   externalContact: z.string().optional(),
+  /** When true, skip Meta template WhatsApp (admin sends link manually via wa.me). */
+  skipWhatsApp: z.boolean().optional(),
 });
 
 export default async function resendTransferOwnership(
@@ -143,21 +145,29 @@ export default async function resendTransferOwnership(
     }
 
     const invitationUrl = buildInvitationUrl(invitation.token_uuid);
-    const waResult = await sendOwnershipInvitation(phoneTarget, {
-      propertyTitle: property.title,
-      invitationUrl,
-      expiryDays: getInvitationExpiryDays(),
-    });
+    const skipWhatsApp = body.skipWhatsApp === true;
 
-    if (waResult.messageId) {
-      await hasuraQuery(UPDATE_MESSAGE_ID, {
-        id: invitation.id,
-        messageId: waResult.messageId,
-      }).catch((err) => console.error("[admin/transfer-ownership/resend] message id", err));
+    let waResult: { success: boolean; messageId?: string; error?: string };
+    if (skipWhatsApp) {
+      waResult = { success: false };
+    } else {
+      waResult = await sendOwnershipInvitation(phoneTarget, {
+        propertyTitle: property.title,
+        invitationUrl,
+        expiryDays: getInvitationExpiryDays(),
+      });
+
+      if (waResult.messageId) {
+        await hasuraQuery(UPDATE_MESSAGE_ID, {
+          id: invitation.id,
+          messageId: waResult.messageId,
+        }).catch((err) => console.error("[admin/transfer-ownership/resend] message id", err));
+      }
     }
 
     await logAdminAction(payload, "transfer_ownership.resend", "property", body.propertyUuid, {
       resendCount: newResendCount,
+      skipWhatsApp,
     }, req);
 
     ok(res, {
@@ -167,7 +177,8 @@ export default async function resendTransferOwnership(
       expiresAt: invitation.expires_at,
       resendCount: newResendCount,
       whatsappSent: waResult.success,
-      whatsappError: waResult.error ?? null,
+      whatsappSkipped: skipWhatsApp,
+      whatsappError: skipWhatsApp ? null : (waResult.error ?? null),
     });
   } catch (error) {
     console.error("[admin/transfer-ownership/resend]", error);

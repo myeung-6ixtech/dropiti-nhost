@@ -3,7 +3,7 @@ import { requireAdminRole } from "../../_lib/auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { UUID_RE } from "../../_lib/admin-offers-incoming";
 import { ok, fail } from "../../_lib/respond";
-import { GET_INVITATION_STATUS } from "../../_lib/transfer-ownership";
+import { buildInvitationUrl, GET_INVITATION_STATUS } from "../../_lib/transfer-ownership";
 
 export default async function transferOwnershipStatus(
   req: Request,
@@ -67,6 +67,7 @@ export default async function transferOwnershipStatus(
       data: {
         invitationId: latest.id,
         tokenUuid: latest.token_uuid,
+        invitationUrl: buildInvitationUrl(latest.token_uuid),
         status: resolvedStatus,
         expiresAt: latest.expires_at,
         createdAt: latest.created_at,
