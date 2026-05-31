@@ -7,6 +7,7 @@ export const ALLOWED_UPLOAD_MIME = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
+  "image/gif",
   "application/pdf",
   "video/mp4",
 ]);

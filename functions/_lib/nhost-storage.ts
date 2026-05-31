@@ -33,6 +33,14 @@ function buildPublicFileUrl(fileId: string): string {
   return `${base}/files/${fileId}`;
 }
 
+/** Parse Nhost file UUID from a stored `public_url`. */
+export function parseStorageFileIdFromPublicUrl(publicUrl: string): string | null {
+  const match = publicUrl.trim().match(/\/v1\/files\/([^/?#]+)/i);
+  const id = match?.[1]?.trim();
+  if (!id) return null;
+  return /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+}
+
 const FIND_MEDIA_BY_SHA256 = `
   query FindMediaBySha256($sha256: String!) {
     real_estate_media_assets(
@@ -100,8 +108,10 @@ export async function uploadFileToNhostStorage(input: {
 
   const existing = await findExistingMediaBySha256(sha256);
   if (existing) {
+    const storageFileId =
+      parseStorageFileIdFromPublicUrl(existing.publicUrl) ?? existing.storageKey;
     return {
-      storageFileId: existing.storageKey,
+      storageFileId,
       storageKey: existing.storageKey,
       publicUrl: existing.publicUrl,
       etag: existing.etag,

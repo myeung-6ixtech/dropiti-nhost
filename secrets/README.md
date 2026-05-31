@@ -21,6 +21,12 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 
 Nhost Storage is **preferred** when Functions have `NHOST_SUBDOMAIN` + `NHOST_REGION` (auto storage URL). Wire `MEDIA_STORAGE_BUCKET` in `nhost/nhost.toml` (`[[global.environment]]`).
 
+### Storage bucket permissions (`dropiti-bucket`)
+
+Admin uploads use the Hasura admin secret (server-side). Thumbnails in the admin console use an authenticated proxy — no bucket change required for **admin preview**.
+
+For **dropiti-v3** and other clients that load `public_url` directly in `<img>` (no auth header), enable **Download** for the `public` role on `dropiti-bucket` in **Dashboard → Storage → Permissions** (custom check: `bucket_id` equals `dropiti-bucket`).
+
 S3 keys remain in `nhost.toml` for fallback only. **Bucket CORS** is required only for the S3 presign path — see `infrastructure/lightsail-bucket-cors.json`.
 
 Optional for function routes that use `getAdminSecret()` in `_lib/env.ts`:

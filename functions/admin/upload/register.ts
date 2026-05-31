@@ -4,6 +4,7 @@ import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
 import { isMediaUploadConfigured } from "../../_lib/media-storage";
 import { insertMediaAsset } from "../../_lib/media-assets";
+import { parseStorageFileIdFromPublicUrl } from "../../_lib/nhost-storage";
 import { isAllowedMime } from "../../_lib/upload-policy";
 import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
@@ -73,7 +74,7 @@ export default async function adminUploadRegister(req: Request, res: Response): 
       filename: body.filename,
       publicUrl: mediaRow.publicUrl,
       s3Key: mediaRow.s3Key,
-      fileId: mediaRow.s3Key,
+      fileId: parseStorageFileIdFromPublicUrl(mediaRow.publicUrl) ?? mediaRow.s3Key,
       mediaId: mediaRow.id,
     });
   } catch (error) {
