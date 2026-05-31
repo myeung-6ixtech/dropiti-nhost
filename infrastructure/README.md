@@ -1,6 +1,11 @@
 # Lightsail / S3 bucket CORS (admin media upload)
 
-Admin media upload uses **presigned PUT**: Nhost Functions sign the URL with `S3_BUCKET_ACCESS_KEY` / `S3_BUCKET_SECRET_KEY`, then the **browser** uploads directly to the bucket. Those credentials run **only on the server**; they do **not** bypass browser CORS.
+Admin media upload uses a **hybrid** strategy (see `dropiti-admin-console-2/documentation/hybrid-upload.md`):
+
+- **≤ 5 MB:** same-origin proxy — browser does **not** call S3; **bucket CORS not required**
+- **> 5 MB:** presigned PUT — browser uploads directly to the bucket; **bucket CORS required**
+
+For the presign path, Nhost Functions sign the URL with `S3_BUCKET_ACCESS_KEY` / `S3_BUCKET_SECRET_KEY`. Those credentials run **only on the server**; they do **not** bypass browser CORS.
 
 | Step | Who | Needs |
 |------|-----|--------|
@@ -64,4 +69,4 @@ aws s3api put-bucket-cors \
 
 - [Lightsail: Configure CORS](https://docs.aws.amazon.com/lightsail/latest/userguide/configure-cors.html)
 - [Lightsail: CORS via CLI](https://docs.aws.amazon.com/lightsail/latest/userguide/cors-configuration-cli.html)
-- Admin upload flow: `dropiti-admin-console-2/src/lib/admin-api.ts` (`adminUploadImages`)
+- Admin upload flow: `dropiti-admin-console-2/documentation/hybrid-upload.md`
