@@ -331,6 +331,18 @@ Nhost injects auto-managed secrets under different names than the raw Dashboard 
 | `HASURA_GRAPHQL_ENDPOINT` | `NHOST_GRAPHQL_URL` | Preferred; fallback builds from subdomain + region |
 | `NHOST_SUBDOMAIN`, `NHOST_REGION` | Auto-injected | Fallback only for GraphQL URL construction |
 
+### Custom secrets → Functions (`[[global.environment]]`)
+
+Dashboard / `.secrets` values are **not** automatically available as `process.env` in Functions unless mapped in `nhost/nhost.toml`. Example (S3 admin upload):
+
+```toml
+[[global.environment]]
+name = 'S3_BUCKET_ACCESS_KEY'
+value = '{{ secrets.S3_BUCKET_ACCESS_KEY }}'
+```
+
+All five `S3_BUCKET_*` keys are wired in `nhost/nhost.toml`. After adding or changing Dashboard secrets, **redeploy Functions**.
+
 ### Full secrets list
 
 ```bash

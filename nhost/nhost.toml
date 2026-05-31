@@ -10,6 +10,24 @@ version = 22
 name = 'DROPITI_PLATFORM_LANDLORD_USER_IDS'
 value = ''
 
+# AWS S3 — admin upload presign (POST /v1/admin/upload/batch, /presign)
+# Dashboard secret names must match; Functions read process.env.S3_BUCKET_* via _lib/env.ts
+[[global.environment]]
+name = 'S3_BUCKET_ACCESS_KEY'
+value = '{{ secrets.S3_BUCKET_ACCESS_KEY }}'
+
+[[global.environment]]
+name = 'S3_BUCKET_SECRET_KEY'
+value = '{{ secrets.S3_BUCKET_SECRET_KEY }}'
+
+[[global.environment]]
+name = 'S3_BUCKET_NAME'
+value = '{{ secrets.S3_BUCKET_NAME }}'
+
+[[global.environment]]
+name = 'S3_BUCKET_AWS_REGION'
+value = 'ap-northeast-2'
+
 [hasura]
 adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
 

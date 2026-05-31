@@ -16,6 +16,10 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 - `HASURA_GRAPHQL_ADMIN_SECRET`
 - `HASURA_GRAPHQL_JWT_SECRET`
 - `GRAFANA_ADMIN_PASSWORD` (managed Grafana; referenced from `[observability.grafana]` in `nhost/nhost.toml` for cloud deploys)
+- `S3_BUCKET_ACCESS_KEY`, `S3_BUCKET_SECRET_KEY`, `S3_BUCKET_NAME` (required for admin media upload)
+- `S3_BUCKET_AWS_REGION`, `S3_BUCKET_DOMAIN_URL` (optional; region defaults to `ap-northeast-2` in code if empty)
+
+S3 keys are exposed to **Functions** via `[[global.environment]]` in `nhost/nhost.toml` (`value = '{{ secrets.S3_BUCKET_* }}'`). Dashboard secrets alone are not enough until that mapping exists and functions are redeployed.
 
 Optional for function routes that use `getAdminSecret()` in `_lib/env.ts`:
 

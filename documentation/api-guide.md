@@ -273,7 +273,7 @@ Use **`hasuraQuery`** from `functions/_lib/hasura.ts` with GraphQL documents at 
 ## Secrets & env
 
 - **Local:** repo-root **`.secrets`** file — copy from `secrets/dotsecrets.example` (`secrets/README.md`).
-- **Cloud:** Nhost Dashboard → Secrets; `nhost/nhost.toml` references `{{ secrets.HASURA_GRAPHQL_* }}` for Hasura.
+- **Cloud:** Nhost Dashboard → Secrets; `nhost/nhost.toml` references `{{ secrets.HASURA_GRAPHQL_* }}` for Hasura and `{{ secrets.S3_BUCKET_* }}` under `[[global.environment]]` for admin upload.
 
 **Secrets** (see `secrets/dotsecrets.example`):
 
