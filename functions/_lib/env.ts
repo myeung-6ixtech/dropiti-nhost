@@ -145,7 +145,37 @@ export function getStorageBaseUrl(): string | undefined {
 }
 
 export function getDefaultAdminMediaBucket(): string {
-  return process.env.NHOST_STORAGE_ADMIN_BUCKET?.trim() || "admin-media";
+  return process.env.NHOST_STORAGE_ADMIN_BUCKET?.trim() || "dropiti-bucket";
+}
+
+export function isNhostStorageConfigured(): boolean {
+  return Boolean(getStorageBaseUrl() && getHasuraAdminSecret());
+}
+
+/** Bucket id stored in Hasura `s3_bucket` (Nhost Storage bucket or S3 bucket name). */
+export function getMediaStorageBucketName(): string {
+  if (getUploadBackend() === "nhost") {
+    return getDefaultAdminMediaBucket();
+  }
+  if (isS3Configured()) {
+    return getS3BucketName();
+  }
+  return getDefaultAdminMediaBucket();
+}
+
+export type UploadBackend = "nhost" | "s3";
+
+/** Prefer Nhost Storage when available; fall back to S3/Lightsail. */
+export function getUploadBackend(): UploadBackend {
+  const forced = process.env.MEDIA_STORAGE_BACKEND?.trim().toLowerCase();
+  if (forced === "nhost" || forced === "s3") return forced;
+  if (isNhostStorageConfigured()) return "nhost";
+  if (isS3Configured()) return "s3";
+  return "s3";
+}
+
+export function isMediaUploadConfigured(): boolean {
+  return getUploadBackend() === "nhost" ? isNhostStorageConfigured() : isS3Configured();
 }
 
 export function getS3AccessKey(): string {

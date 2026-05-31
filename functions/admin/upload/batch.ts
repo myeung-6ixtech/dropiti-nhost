@@ -2,8 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
-import { createS3PresignedPut } from "../../_lib/s3";
-import { isS3Configured } from "../../_lib/env";
+import { createBatchUploadSlot, isMediaUploadConfigured, getUploadBackend } from "../../_lib/media-storage";
 import {
   IMAGE_MAX_HEIGHT,
   IMAGE_MAX_WIDTH,
@@ -16,6 +15,7 @@ import { ok, fail } from "../../_lib/respond";
 const FileSchema = z.object({
   filename: z.string().min(1),
   mimeType: z.string().min(1),
+  sha256: z.string().min(1),
   bucketId: z.string().optional(),
 });
 
@@ -31,8 +31,8 @@ export default async function adminUploadBatch(req: Request, res: Response): Pro
     const payload = await requireAdminRole(req, res);
     if (!payload) return;
 
-    if (!isS3Configured()) {
-      fail(res, "S3 upload is not configured", 503);
+    if (!isMediaUploadConfigured()) {
+      fail(res, "Media upload is not configured", 503);
       return;
     }
 
@@ -57,19 +57,25 @@ export default async function adminUploadBatch(req: Request, res: Response): Pro
 
     const items = await Promise.all(
       parsed.data.map(async (file) => {
-        const presigned = await createS3PresignedPut(file);
-        return {
+        const slot = await createBatchUploadSlot({
           filename: file.filename,
-          uploadUrl: presigned.uploadUrl,
-          s3Key: presigned.s3Key,
-          publicUrl: presigned.publicUrl,
-          fileId: presigned.fileId,
+          mimeType: file.mimeType,
+          sha256: file.sha256,
+        });
+        return {
+          filename: slot.filename,
+          uploadUrl: slot.uploadUrl,
+          s3Key: slot.storageKey,
+          publicUrl: slot.publicUrl,
+          fileId: slot.fileId,
+          useProxy: slot.useProxy ?? false,
         };
       })
     );
 
     ok(res, {
       items,
+      storageBackend: getUploadBackend(),
       imageHints: {
         maxWidth: IMAGE_MAX_WIDTH,
         maxHeight: IMAGE_MAX_HEIGHT,

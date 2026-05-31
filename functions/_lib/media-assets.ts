@@ -1,5 +1,5 @@
 import { hasuraQuery } from "./hasura";
-import { getS3BucketName } from "./env";
+import { getMediaStorageBucketName } from "./env";
 
 export type MediaAssetInsertInput = {
   s3Key: string;
@@ -57,7 +57,7 @@ export async function insertMediaAsset(
       s3_key: string;
     } | null;
   }>(INSERT_MEDIA_ASSET, {
-    s3_bucket: getS3BucketName(),
+    s3_bucket: getMediaStorageBucketName(),
     s3_key: input.s3Key,
     public_url: input.publicUrl,
     sha256: input.sha256,

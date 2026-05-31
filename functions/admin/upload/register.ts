@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
-import { isS3Configured } from "../../_lib/env";
+import { isMediaUploadConfigured } from "../../_lib/media-storage";
 import { insertMediaAsset } from "../../_lib/media-assets";
 import { isAllowedMime } from "../../_lib/upload-policy";
 import { validateBody } from "../../_lib/validate";
@@ -33,8 +33,8 @@ export default async function adminUploadRegister(req: Request, res: Response): 
     const payload = await requireAdminRole(req, res);
     if (!payload) return;
 
-    if (!isS3Configured()) {
-      fail(res, "S3 upload is not configured", 503);
+    if (!isMediaUploadConfigured()) {
+      fail(res, "Media upload is not configured", 503);
       return;
     }
 

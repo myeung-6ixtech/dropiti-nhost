@@ -1,15 +1,13 @@
 import type { Request, Response } from "express";
 import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
-import { putObjectToS3 } from "../../_lib/s3";
-import { isS3Configured } from "../../_lib/env";
+import { uploadMediaFile, getProxyUploadMaxBytes, isMediaUploadConfigured } from "../../_lib/media-storage";
 import { insertMediaAsset } from "../../_lib/media-assets";
 import {
   IMAGE_MAX_HEIGHT,
   IMAGE_MAX_WIDTH,
   IMAGE_WEBP_QUALITY,
   isAllowedMime,
-  PROXY_UPLOAD_MAX_BYTES,
 } from "../../_lib/upload-policy";
 import { ok, fail } from "../../_lib/respond";
 
@@ -50,8 +48,8 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
     const payload = await requireAdminRole(req, res);
     if (!payload) return;
 
-    if (!isS3Configured()) {
-      fail(res, "S3 upload is not configured", 503);
+    if (!isMediaUploadConfigured()) {
+      fail(res, "Media upload is not configured", 503);
       return;
     }
 
@@ -67,10 +65,11 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
       return;
     }
 
-    if (body.length > PROXY_UPLOAD_MAX_BYTES) {
+    const maxBytes = getProxyUploadMaxBytes();
+    if (body.length > maxBytes) {
       fail(
         res,
-        `File too large for proxy upload (max ${PROXY_UPLOAD_MAX_BYTES} bytes). Use presigned upload.`,
+        `File too large for proxy upload (max ${maxBytes} bytes).`,
         413
       );
       return;
@@ -94,30 +93,33 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
     const clientSha256 =
       typeof req.headers["x-sha256"] === "string" ? req.headers["x-sha256"].trim() : undefined;
 
-    const uploaded = await putObjectToS3({
+    const uploaded = await uploadMediaFile({
       body,
       filename,
       mimeType,
       sha256: clientSha256,
     });
 
-    const mediaRow = await insertMediaAsset({
-      s3Key: uploaded.s3Key,
-      publicUrl: uploaded.publicUrl,
-      sha256: uploaded.sha256,
-      contentType: mimeType,
-      sizeBytes: body.length,
-      etag: uploaded.etag,
-      width,
-      height,
-      originalFilename: filename,
-    });
+    const mediaRow = uploaded.deduped && uploaded.mediaId
+      ? { id: uploaded.mediaId, publicUrl: uploaded.publicUrl, s3Key: uploaded.storageKey }
+      : await insertMediaAsset({
+          s3Key: uploaded.storageKey,
+          publicUrl: uploaded.publicUrl,
+          sha256: uploaded.sha256,
+          contentType: mimeType,
+          sizeBytes: body.length,
+          etag: uploaded.etag,
+          width,
+          height,
+          originalFilename: filename,
+        });
 
     ok(res, {
       filename,
       publicUrl: uploaded.publicUrl,
-      s3Key: uploaded.s3Key,
+      s3Key: uploaded.storageKey,
       fileId: uploaded.fileId,
+      storageFileId: uploaded.storageFileId ?? null,
       sha256: uploaded.sha256,
       deduped: uploaded.deduped,
       mediaId: mediaRow?.id ?? null,
@@ -130,7 +132,7 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
   } catch (error) {
     console.error("[admin/upload/image]", error);
     const message = error instanceof Error ? error.message : "Internal server error";
-    const isS3 = message.includes("S3 PutObject failed");
-    fail(res, isS3 ? message : "Internal server error", isS3 ? 502 : 500);
+    const isStorage = message.includes("Storage") || message.includes("S3 PutObject");
+    fail(res, isStorage ? message : "Internal server error", isStorage ? 502 : 500);
   }
 }

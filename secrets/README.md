@@ -16,12 +16,12 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 - `HASURA_GRAPHQL_ADMIN_SECRET`
 - `HASURA_GRAPHQL_JWT_SECRET`
 - `GRAFANA_ADMIN_PASSWORD` (managed Grafana; referenced from `[observability.grafana]` in `nhost/nhost.toml` for cloud deploys)
-- `S3_BUCKET_ACCESS_KEY`, `S3_BUCKET_SECRET_KEY`, `S3_BUCKET_NAME` (required for admin media upload)
-- `S3_BUCKET_AWS_REGION`, `S3_BUCKET_DOMAIN_URL` (optional; region defaults to `ap-northeast-2` in code if empty)
+- `NHOST_STORAGE_ADMIN_BUCKET` (default `dropiti-bucket` — create in Dashboard → Storage, public read for images)
+- `S3_BUCKET_*` (optional fallback when `MEDIA_STORAGE_BACKEND=s3`)
 
-S3 keys are exposed to **Functions** via `[[global.environment]]` in `nhost/nhost.toml` (`value = '{{ secrets.S3_BUCKET_* }}'`). Dashboard secrets alone are not enough until that mapping exists and functions are redeployed.
+Nhost Storage is **preferred** when Functions have `NHOST_SUBDOMAIN` + `NHOST_REGION` (auto storage URL). Wire `NHOST_STORAGE_ADMIN_BUCKET` in `nhost/nhost.toml`.
 
-**Browser upload CORS:** presigned URLs still require **bucket CORS** on Lightsail/S3 (not Nhost). See `infrastructure/lightsail-bucket-cors.json` and `infrastructure/README.md`.
+S3 keys remain in `nhost.toml` for fallback only. **Bucket CORS** is required only for the S3 presign path — see `infrastructure/lightsail-bucket-cors.json`.
 
 Optional for function routes that use `getAdminSecret()` in `_lib/env.ts`:
 

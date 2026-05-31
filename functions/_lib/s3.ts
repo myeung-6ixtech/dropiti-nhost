@@ -9,6 +9,7 @@ import {
   getS3SecretKey,
   isS3Configured,
 } from "./env";
+import { buildHashStorageKey } from "./storage-paths";
 
 export type S3PresignResult = {
   uploadUrl: string;
@@ -39,7 +40,7 @@ function sanitizeFilename(filename: string): string {
   return base || "file";
 }
 
-function buildS3Key(filename: string): string {
+function buildLegacyS3Key(filename: string): string {
   const safe = sanitizeFilename(filename);
   const date = new Date().toISOString().slice(0, 10);
   return `admin-uploads/${date}/${randomUUID()}-${safe}`;
@@ -58,12 +59,15 @@ export function buildPublicUrl(s3Key: string): string {
 export async function createS3PresignedPut(input: {
   filename: string;
   mimeType: string;
+  sha256?: string;
 }): Promise<S3PresignResult> {
   if (!isS3Configured()) {
     throw new Error("S3 is not configured (S3_BUCKET_* env vars missing)");
   }
 
-  const s3Key = buildS3Key(input.filename);
+  const s3Key = input.sha256
+    ? buildHashStorageKey(input.sha256, input.mimeType)
+    : buildLegacyS3Key(input.filename);
   const bucket = getS3BucketName();
   const command = new PutObjectCommand({
     Bucket: bucket,
@@ -83,14 +87,9 @@ export async function createS3PresignedPut(input: {
   };
 }
 
-function extensionFromMime(mimeType: string): string {
-  const part = mimeType.split("/")[1]?.split(";")[0]?.trim();
-  if (!part || part === "octet-stream") return "bin";
-  return part.replace(/[^a-z0-9]/gi, "") || "bin";
-}
-
+/** @deprecated Use buildHashStorageKey from storage-paths.ts */
 export function buildHashS3Key(sha256: string, mimeType: string): string {
-  return `uploads/by-hash/${sha256}.${extensionFromMime(mimeType)}`;
+  return buildHashStorageKey(sha256, mimeType);
 }
 
 /** True when HeadObject indicates the key is absent or dedup cannot be checked. */
@@ -160,7 +159,7 @@ export async function putObjectToS3(input: {
   const sha256 =
     input.sha256?.trim() ||
     createHash("sha256").update(input.body).digest("hex");
-  const s3Key = buildHashS3Key(sha256, input.mimeType);
+  const s3Key = buildHashStorageKey(sha256, input.mimeType);
   const publicUrl = buildPublicUrl(s3Key);
   const exists = await headObjectExists(s3Key);
 

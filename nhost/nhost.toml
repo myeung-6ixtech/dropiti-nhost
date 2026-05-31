@@ -10,8 +10,17 @@ version = 22
 name = 'DROPITI_PLATFORM_LANDLORD_USER_IDS'
 value = ''
 
-# AWS S3 — admin upload presign (POST /v1/admin/upload/batch, /presign)
-# Dashboard secret names must match; Functions read process.env.S3_BUCKET_* via _lib/env.ts
+# Nhost Storage — admin media (`dropiti-bucket`); preferred over S3 when subdomain/region are set.
+[[global.environment]]
+name = 'NHOST_STORAGE_ADMIN_BUCKET'
+value = '{{ secrets.NHOST_STORAGE_ADMIN_BUCKET }}'
+
+# Optional: force backend — `nhost` | `s3` (default: nhost when storage URL resolves, else s3)
+# [[global.environment]]
+# name = 'MEDIA_STORAGE_BACKEND'
+# value = 'nhost'
+
+# AWS S3 — fallback when Nhost Storage is unavailable
 [[global.environment]]
 name = 'S3_BUCKET_ACCESS_KEY'
 value = '{{ secrets.S3_BUCKET_ACCESS_KEY }}'

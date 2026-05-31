@@ -13,8 +13,14 @@ export const ALLOWED_UPLOAD_MIME = new Set([
 
 export const MAX_BATCH_UPLOAD_FILES = 20;
 
-/** Files at or below this size use same-origin proxy upload (no S3 CORS). */
-export const PROXY_UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+/** Proxy cap when backend is external S3/Lightsail (avoid large payloads + use presign above this). */
+export const PROXY_UPLOAD_MAX_BYTES_S3 = 5 * 1024 * 1024;
+
+/** Proxy cap when backend is Nhost Storage (no browser → S3 CORS; matches UI 10 MB max). */
+export const PROXY_UPLOAD_MAX_BYTES_NHOST = 10 * 1024 * 1024;
+
+/** @deprecated Use getProxyUploadMaxBytes() from media-storage.ts */
+export const PROXY_UPLOAD_MAX_BYTES = PROXY_UPLOAD_MAX_BYTES_S3;
 
 /** Hard cap for presigned direct PUT (browser → S3; requires bucket CORS). */
 export const DIRECT_PRESIGN_MAX_BYTES = 10 * 1024 * 1024;
@@ -23,6 +29,6 @@ export function isAllowedMime(mimeType: string): boolean {
   return ALLOWED_UPLOAD_MIME.has(mimeType);
 }
 
-export function isProxyEligibleSize(sizeBytes: number): boolean {
-  return sizeBytes > 0 && sizeBytes <= PROXY_UPLOAD_MAX_BYTES;
+export function isProxyEligibleSize(sizeBytes: number, maxBytes: number): boolean {
+  return sizeBytes > 0 && sizeBytes <= maxBytes;
 }
