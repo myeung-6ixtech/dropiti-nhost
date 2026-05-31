@@ -93,6 +93,34 @@ export function buildHashS3Key(sha256: string, mimeType: string): string {
   return `uploads/by-hash/${sha256}.${extensionFromMime(mimeType)}`;
 }
 
+/** True when HeadObject indicates the key is absent or dedup cannot be checked. */
+function isHeadObjectAbsentOrUncheckable(err: unknown): boolean {
+  const error = err as {
+    name?: string;
+    Code?: string;
+    $metadata?: { httpStatusCode?: number };
+  };
+  const status = error.$metadata?.httpStatusCode;
+  if (status === 404) return true;
+  if (
+    error.name === "NotFound" ||
+    error.Code === "NotFound" ||
+    error.name === "NoSuchKey" ||
+    error.Code === "NoSuchKey"
+  ) {
+    return true;
+  }
+  // AWS S3 returns 403 (not 404) when the key is missing but the IAM key lacks
+  // s3:GetObject / s3:ListBucket — common for upload-only Lightsail/IAM policies.
+  if (status === 403) {
+    console.warn(
+      "[s3] HeadObject 403 for key — assuming not present (dedup skipped; needs s3:GetObject for dedup)"
+    );
+    return true;
+  }
+  return false;
+}
+
 export async function headObjectExists(s3Key: string): Promise<boolean> {
   if (!isS3Configured()) return false;
   try {
@@ -104,16 +132,7 @@ export async function headObjectExists(s3Key: string): Promise<boolean> {
     );
     return true;
   } catch (err: unknown) {
-    const error = err as {
-      name?: string;
-      Code?: string;
-      $metadata?: { httpStatusCode?: number };
-    };
-    const isNotFound =
-      error.name === "NotFound" ||
-      error.Code === "NotFound" ||
-      error.$metadata?.httpStatusCode === 404;
-    if (isNotFound) return false;
+    if (isHeadObjectAbsentOrUncheckable(err)) return false;
     throw err;
   }
 }
@@ -147,15 +166,24 @@ export async function putObjectToS3(input: {
 
   let etag: string | undefined;
   if (!exists) {
-    const uploadResult = await getClient().send(
-      new PutObjectCommand({
-        Bucket: getS3BucketName(),
-        Key: s3Key,
-        Body: input.body,
-        ContentType: input.mimeType,
-      })
-    );
-    etag = uploadResult.ETag?.replace(/"/g, "");
+    try {
+      const uploadResult = await getClient().send(
+        new PutObjectCommand({
+          Bucket: getS3BucketName(),
+          Key: s3Key,
+          Body: input.body,
+          ContentType: input.mimeType,
+        })
+      );
+      etag = uploadResult.ETag?.replace(/"/g, "");
+    } catch (err: unknown) {
+      const error = err as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+      const status = error.$metadata?.httpStatusCode;
+      const code = error.Code ?? error.name ?? "Unknown";
+      throw new Error(
+        `S3 PutObject failed (${status ?? "?"} ${code}). Check S3_BUCKET_* secrets, bucket name, region, and s3:PutObject on the access key.`
+      );
+    }
   }
 
   return {

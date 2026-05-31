@@ -129,6 +129,8 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
     });
   } catch (error) {
     console.error("[admin/upload/image]", error);
-    fail(res, "Internal server error", 500);
+    const message = error instanceof Error ? error.message : "Internal server error";
+    const isS3 = message.includes("S3 PutObject failed");
+    fail(res, isS3 ? message : "Internal server error", isS3 ? 502 : 500);
   }
 }
