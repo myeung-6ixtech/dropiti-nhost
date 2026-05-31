@@ -12,8 +12,8 @@ value = ''
 
 # Nhost Storage — admin media (`dropiti-bucket`); preferred over S3 when subdomain/region are set.
 [[global.environment]]
-name = 'NHOST_STORAGE_ADMIN_BUCKET'
-value = '{{ secrets.NHOST_STORAGE_ADMIN_BUCKET }}'
+name = 'MEDIA_STORAGE_BUCKET'
+value = '{{ secrets.MEDIA_STORAGE_BUCKET }}'
 
 # Optional: force backend — `nhost` | `s3` (default: nhost when storage URL resolves, else s3)
 # [[global.environment]]

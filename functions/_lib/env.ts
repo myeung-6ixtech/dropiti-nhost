@@ -145,7 +145,7 @@ export function getStorageBaseUrl(): string | undefined {
 }
 
 export function getDefaultAdminMediaBucket(): string {
-  return process.env.NHOST_STORAGE_ADMIN_BUCKET?.trim() || "dropiti-bucket";
+  return process.env.MEDIA_STORAGE_BUCKET?.trim() || "dropiti-bucket";
 }
 
 export function isNhostStorageConfigured(): boolean {

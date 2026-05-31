@@ -16,10 +16,10 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 - `HASURA_GRAPHQL_ADMIN_SECRET`
 - `HASURA_GRAPHQL_JWT_SECRET`
 - `GRAFANA_ADMIN_PASSWORD` (managed Grafana; referenced from `[observability.grafana]` in `nhost/nhost.toml` for cloud deploys)
-- `NHOST_STORAGE_ADMIN_BUCKET` (default `dropiti-bucket` — create in Dashboard → Storage, public read for images)
+- `MEDIA_STORAGE_BUCKET` (default `dropiti-bucket` — create in Dashboard → Storage, public read for images; must **not** use a `NHOST_` prefix in `[[global.environment]]`)
 - `S3_BUCKET_*` (optional fallback when `MEDIA_STORAGE_BACKEND=s3`)
 
-Nhost Storage is **preferred** when Functions have `NHOST_SUBDOMAIN` + `NHOST_REGION` (auto storage URL). Wire `NHOST_STORAGE_ADMIN_BUCKET` in `nhost/nhost.toml`.
+Nhost Storage is **preferred** when Functions have `NHOST_SUBDOMAIN` + `NHOST_REGION` (auto storage URL). Wire `MEDIA_STORAGE_BUCKET` in `nhost/nhost.toml` (`[[global.environment]]`).
 
 S3 keys remain in `nhost.toml` for fallback only. **Bucket CORS** is required only for the S3 presign path — see `infrastructure/lightsail-bucket-cors.json`.
 
