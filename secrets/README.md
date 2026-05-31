@@ -21,6 +21,8 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 
 S3 keys are exposed to **Functions** via `[[global.environment]]` in `nhost/nhost.toml` (`value = '{{ secrets.S3_BUCKET_* }}'`). Dashboard secrets alone are not enough until that mapping exists and functions are redeployed.
 
+**Browser upload CORS:** presigned URLs still require **bucket CORS** on Lightsail/S3 (not Nhost). See `infrastructure/lightsail-bucket-cors.json` and `infrastructure/README.md`.
+
 Optional for function routes that use `getAdminSecret()` in `_lib/env.ts`:
 
 - `ADMIN_SECRET` (set via Dashboard / `[[global.environment]]` in cloud; locally you can add to `.secrets` only if your Nhost CLI version loads extra keys into Functions runtime — otherwise use Dashboard for app-specific secrets.)
