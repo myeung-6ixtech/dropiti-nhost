@@ -173,6 +173,81 @@ export async function uploadFileToNhostStorage(input: {
   };
 }
 
+const STORAGE_TRANSFORM_PARAMS = new Set(["w", "h", "f", "q", "blur"]);
+
+export type NhostStorageDownloadResult =
+  | {
+      ok: true;
+      body: Buffer;
+      contentType?: string;
+      etag?: string;
+      cacheControl?: string;
+    }
+  | { ok: false; status: number; message: string; details?: string };
+
+function pickTransformQuery(
+  query: Record<string, unknown> | undefined
+): URLSearchParams {
+  const transform = new URLSearchParams();
+  if (!query) return transform;
+  for (const [key, value] of Object.entries(query)) {
+    if (!STORAGE_TRANSFORM_PARAMS.has(key) || typeof value !== "string" || !value.trim()) {
+      continue;
+    }
+    transform.set(key, value.trim());
+  }
+  return transform;
+}
+
+/** Download file bytes from Nhost Storage (server-side admin secret). */
+export async function downloadNhostStorageFile(input: {
+  fileId: string;
+  query?: Record<string, unknown>;
+  bearerToken?: string;
+}): Promise<NhostStorageDownloadResult> {
+  const storageBase = getStorageBaseUrl();
+  if (!storageBase) {
+    return { ok: false, status: 503, message: "Nhost Storage is not configured" };
+  }
+
+  const id = input.fileId.trim();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) {
+    return { ok: false, status: 400, message: "Invalid file id" };
+  }
+
+  const transform = pickTransformQuery(input.query);
+  const qs = transform.toString();
+  const upstreamUrl = `${storageBase}/files/${id}${qs ? `?${qs}` : ""}`;
+
+  const headers: Record<string, string> = {
+    "x-hasura-admin-secret": getHasuraAdminSecret(),
+  };
+  const token = input.bearerToken?.trim();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const upstream = await fetch(upstreamUrl, { headers });
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => "");
+    return {
+      ok: false,
+      status: upstream.status === 404 ? 404 : 502,
+      message: `Storage download failed (HTTP ${upstream.status})`,
+      details: text.slice(0, 200) || undefined,
+    };
+  }
+
+  return {
+    ok: true,
+    body: Buffer.from(await upstream.arrayBuffer()),
+    contentType: upstream.headers.get("content-type") ?? undefined,
+    etag: upstream.headers.get("etag") ?? undefined,
+    cacheControl: upstream.headers.get("cache-control") ?? undefined,
+  };
+}
+
 export type NhostPresignSlot = {
   uploadUrl: string;
   storageKey: string;

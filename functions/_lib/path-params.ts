@@ -18,6 +18,8 @@ const RESERVED_SEGMENTS = new Set([
   "get-beneficiary",
   "get-intent",
   "get-payment",
+  "get-file",
+  "file",
   "create-property",
   "update-property",
 ]);
