@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { requireAdminRole } from "../../_lib/auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { parseListQuery, listEnvelope } from "../../_lib/admin-pagination";
+import { normalizeMediaRow } from "../../_lib/media-normalize";
 import { ok, fail } from "../../_lib/respond";
 
 /** Escape `%` and `_` for Postgres ILIKE via Hasura. */
@@ -120,7 +121,9 @@ export default async function adminMediaIndex(req: Request, res: Response): Prom
       return;
     }
 
-    const items = result.data?.real_estate_media_assets ?? [];
+    const items = (result.data?.real_estate_media_assets ?? []).map((row) =>
+      normalizeMediaRow(row as { public_url?: string; s3_key?: string })
+    );
     const total =
       result.data?.real_estate_media_assets_aggregate?.aggregate?.count ?? items.length;
     ok(res, listEnvelope(items, total, limit, offset));

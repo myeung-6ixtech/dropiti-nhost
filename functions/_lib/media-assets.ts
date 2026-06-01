@@ -1,5 +1,6 @@
 import { hasuraQuery } from "./hasura";
 import { getMediaStorageBucketName } from "./env";
+import { normalizeMediaAssetFields } from "./media-normalize";
 
 export type MediaAssetInsertInput = {
   s3Key: string;
@@ -50,6 +51,13 @@ const INSERT_MEDIA_ASSET = `
 export async function insertMediaAsset(
   input: MediaAssetInsertInput
 ): Promise<{ id: string; publicUrl: string; s3Key: string } | null> {
+  const normalized = normalizeMediaAssetFields({
+    s3Key: input.s3Key,
+    publicUrl: input.publicUrl,
+    originalFilename: input.originalFilename,
+    sha256: input.sha256,
+  });
+
   const result = await hasuraQuery<{
     insert_real_estate_media_assets_one?: {
       id: string;
@@ -58,15 +66,15 @@ export async function insertMediaAsset(
     } | null;
   }>(INSERT_MEDIA_ASSET, {
     s3_bucket: getMediaStorageBucketName(),
-    s3_key: input.s3Key,
-    public_url: input.publicUrl,
-    sha256: input.sha256,
+    s3_key: normalized.s3Key,
+    public_url: normalized.publicUrl,
+    sha256: normalized.sha256 ?? input.sha256,
     etag: input.etag ?? null,
     content_type: input.contentType,
     size_bytes: input.sizeBytes,
     width: input.width ?? null,
     height: input.height ?? null,
-    original_filename: input.originalFilename ?? null,
+    original_filename: normalized.originalFilename ?? null,
   });
 
   if (result.errors?.length) {
