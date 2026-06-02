@@ -34,6 +34,17 @@ function readRawBody(req: Request): Promise<Buffer | null> {
   });
 }
 
+function guessMimeTypeFromFilename(filename: string): string | null {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  return null;
+}
+
 /**
  * POST /v1/admin/upload/image — proxy upload (same-origin BFF forwards raw bytes).
  * Body: raw file bytes. Headers: Content-Type, X-Filename, optional X-Width, X-Height, X-Sha256.
@@ -75,18 +86,21 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
       return;
     }
 
-    const mimeType = String(req.headers["content-type"] ?? "application/octet-stream")
-      .split(";")[0]
-      .trim();
-    if (!isAllowedMime(mimeType)) {
-      fail(res, `MIME type not allowed: ${mimeType}`, 400);
-      return;
-    }
-
     const filenameHeader = req.headers["x-filename"];
     const filename = filenameHeader
       ? decodeURIComponent(String(filenameHeader))
       : "upload";
+
+    let mimeType = String(req.headers["content-type"] ?? "application/octet-stream")
+      .split(";")[0]
+      .trim();
+    if (!mimeType || mimeType === "application/octet-stream") {
+      mimeType = guessMimeTypeFromFilename(filename) ?? "application/octet-stream";
+    }
+    if (!isAllowedMime(mimeType)) {
+      fail(res, `MIME type not allowed: ${mimeType}`, 400);
+      return;
+    }
 
     const width = parseOptionalInt(req.headers["x-width"]);
     const height = parseOptionalInt(req.headers["x-height"]);
