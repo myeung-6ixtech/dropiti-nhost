@@ -4,12 +4,20 @@ import {
   isMediaUploadConfigured,
   isNhostStorageConfigured,
   isS3Configured,
+  type UploadBackend,
 } from "./env";
-import { uploadFileToNhostStorage, createNhostBatchSlot, type NhostUploadResult } from "./nhost-storage";
+import {
+  findExistingMediaBySha256,
+  nhostStorageFileExists,
+  parseStorageFileIdFromPublicUrl,
+  postMultipartToNhostStorage,
+  createNhostBatchSlot,
+} from "./nhost-storage";
+import { isLegacyS3MediaUrl, isNhostStoragePublicUrl } from "./media-url";
+import { persistMediaCatalog, type MediaCatalogInput } from "./media-assets";
 import {
   createS3PresignedPut,
   putObjectToS3,
-  type PutObjectResult,
   type S3PresignResult,
 } from "./s3";
 import { buildHashStorageKey } from "./storage-paths";
@@ -26,7 +34,10 @@ export type MediaUploadResult = {
   etag?: string;
   sha256: string;
   deduped: boolean;
-  mediaId?: string;
+  repaired: boolean;
+  migrated: boolean;
+  mediaId: string;
+  storageBackend: UploadBackend;
 };
 
 export type BatchUploadSlot = {
@@ -52,53 +63,231 @@ export function assertMediaUploadConfigured(): void {
   }
 }
 
-/** Server-side upload (proxy path). */
-export async function uploadMediaFile(input: {
+function catalogInput(
+  input: {
+    storageKey: string;
+    publicUrl: string;
+    sha256: string;
+    mimeType: string;
+    sizeBytes: number;
+    etag?: string;
+    width?: number;
+    height?: number;
+    filename: string;
+  }
+): MediaCatalogInput {
+  return {
+    s3Key: input.storageKey,
+    publicUrl: input.publicUrl,
+    sha256: input.sha256,
+    contentType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    etag: input.etag,
+    width: input.width,
+    height: input.height,
+    originalFilename: input.filename,
+  };
+}
+
+async function uploadMediaFileNhost(input: {
   body: Buffer;
   filename: string;
   mimeType: string;
   sha256?: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
 }): Promise<MediaUploadResult> {
-  assertMediaUploadConfigured();
-
   const sha256 =
     input.sha256?.trim() || createHash("sha256").update(input.body).digest("hex");
   const storageKey = buildHashStorageKey(sha256, input.mimeType);
+  const existing = await findExistingMediaBySha256(sha256);
+  const backend = getUploadBackend();
 
-  if (getUploadBackend() === "nhost") {
-    const uploaded: NhostUploadResult = await uploadFileToNhostStorage({
+  if (existing) {
+    const existingFileId = parseStorageFileIdFromPublicUrl(existing.publicUrl);
+
+    if (existingFileId && isNhostStoragePublicUrl(existing.publicUrl)) {
+      const exists = await nhostStorageFileExists(existingFileId);
+      if (exists) {
+        return {
+          storageKey: existing.storageKey,
+          publicUrl: existing.publicUrl,
+          fileId: existingFileId,
+          storageFileId: existingFileId,
+          etag: existing.etag,
+          sha256,
+          deduped: true,
+          repaired: false,
+          migrated: false,
+          mediaId: existing.mediaId,
+          storageBackend: backend,
+        };
+      }
+    }
+
+    const wasLegacyS3 = isLegacyS3MediaUrl(existing.publicUrl);
+    const posted = await postMultipartToNhostStorage({
       body: input.body,
       mimeType: input.mimeType,
       logicalPath: storageKey,
       originalFilename: input.filename,
       sha256,
     });
+
+    const catalog = await persistMediaCatalog(
+      existing.mediaId,
+      catalogInput({
+        storageKey: posted.storageKey,
+        publicUrl: posted.publicUrl,
+        sha256,
+        mimeType: input.mimeType,
+        sizeBytes: input.sizeBytes,
+        etag: posted.etag,
+        width: input.width,
+        height: input.height,
+        filename: input.filename,
+      })
+    );
+
+    const repaired = !wasLegacyS3;
+    const migrated = wasLegacyS3;
+
     return {
-      storageKey: uploaded.storageKey,
-      publicUrl: uploaded.publicUrl,
-      fileId: uploaded.storageFileId,
-      storageFileId: uploaded.storageFileId,
-      etag: uploaded.etag,
-      sha256: uploaded.sha256,
-      deduped: uploaded.deduped,
-      mediaId: uploaded.mediaId,
+      storageKey: catalog.s3Key,
+      publicUrl: catalog.publicUrl,
+      fileId: posted.storageFileId,
+      storageFileId: posted.storageFileId,
+      etag: posted.etag,
+      sha256,
+      deduped: false,
+      repaired,
+      migrated,
+      mediaId: catalog.id,
+      storageBackend: backend,
     };
   }
 
-  const uploaded: PutObjectResult = await putObjectToS3({
+  const posted = await postMultipartToNhostStorage({
+    body: input.body,
+    mimeType: input.mimeType,
+    logicalPath: storageKey,
+    originalFilename: input.filename,
+    sha256,
+  });
+
+  const catalog = await persistMediaCatalog(
+    undefined,
+    catalogInput({
+      storageKey: posted.storageKey,
+      publicUrl: posted.publicUrl,
+      sha256,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      etag: posted.etag,
+      width: input.width,
+      height: input.height,
+      filename: input.filename,
+    })
+  );
+
+  return {
+    storageKey: catalog.s3Key,
+    publicUrl: catalog.publicUrl,
+    fileId: posted.storageFileId,
+    storageFileId: posted.storageFileId,
+    etag: posted.etag,
+    sha256,
+    deduped: false,
+    repaired: false,
+    migrated: false,
+    mediaId: catalog.id,
+    storageBackend: backend,
+  };
+}
+
+async function uploadMediaFileS3(input: {
+  body: Buffer;
+  filename: string;
+  mimeType: string;
+  sha256?: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
+}): Promise<MediaUploadResult> {
+  const sha256 =
+    input.sha256?.trim() || createHash("sha256").update(input.body).digest("hex");
+  const existing = await findExistingMediaBySha256(sha256);
+  const backend = getUploadBackend();
+
+  const uploaded = await putObjectToS3({
     body: input.body,
     filename: input.filename,
     mimeType: input.mimeType,
     sha256,
   });
+
+  if (uploaded.deduped && existing) {
+    return {
+      storageKey: existing.storageKey,
+      publicUrl: existing.publicUrl,
+      fileId: uploaded.fileId,
+      etag: existing.etag ?? uploaded.etag,
+      sha256,
+      deduped: true,
+      repaired: false,
+      migrated: false,
+      mediaId: existing.mediaId,
+      storageBackend: backend,
+    };
+  }
+
+  const catalog = await persistMediaCatalog(
+    existing?.mediaId,
+    catalogInput({
+      storageKey: uploaded.s3Key,
+      publicUrl: uploaded.publicUrl,
+      sha256,
+      mimeType: input.mimeType,
+      sizeBytes: input.sizeBytes,
+      etag: uploaded.etag,
+      width: input.width,
+      height: input.height,
+      filename: input.filename,
+    })
+  );
+
   return {
-    storageKey: uploaded.s3Key,
-    publicUrl: uploaded.publicUrl,
+    storageKey: catalog.s3Key,
+    publicUrl: catalog.publicUrl,
     fileId: uploaded.fileId,
     etag: uploaded.etag,
-    sha256: uploaded.sha256,
-    deduped: uploaded.deduped,
+    sha256,
+    deduped: uploaded.deduped && Boolean(existing),
+    repaired: false,
+    migrated: false,
+    mediaId: catalog.id,
+    storageBackend: backend,
   };
+}
+
+/** Server-side upload (proxy path) with Storage + Hasura catalog sync. */
+export async function uploadMediaFile(input: {
+  body: Buffer;
+  filename: string;
+  mimeType: string;
+  sha256?: string;
+  sizeBytes: number;
+  width?: number;
+  height?: number;
+}): Promise<MediaUploadResult> {
+  assertMediaUploadConfigured();
+
+  if (getUploadBackend() === "nhost") {
+    return uploadMediaFileNhost(input);
+  }
+
+  return uploadMediaFileS3(input);
 }
 
 /** Presign / batch slot for client-side PUT (S3) or proxy hint (Nhost). */

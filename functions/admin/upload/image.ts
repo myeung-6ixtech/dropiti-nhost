@@ -1,8 +1,11 @@
 import type { Request, Response } from "express";
 import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
-import { uploadMediaFile, getProxyUploadMaxBytes, isMediaUploadConfigured } from "../../_lib/media-storage";
-import { insertMediaAsset } from "../../_lib/media-assets";
+import {
+  uploadMediaFile,
+  getProxyUploadMaxBytes,
+  isMediaUploadConfigured,
+} from "../../_lib/media-storage";
 import {
   IMAGE_MAX_HEIGHT,
   IMAGE_MAX_WIDTH,
@@ -112,21 +115,10 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
       filename,
       mimeType,
       sha256: clientSha256,
+      sizeBytes: body.length,
+      width,
+      height,
     });
-
-    const mediaRow = uploaded.deduped && uploaded.mediaId
-      ? { id: uploaded.mediaId, publicUrl: uploaded.publicUrl, s3Key: uploaded.storageKey }
-      : await insertMediaAsset({
-          s3Key: uploaded.storageKey,
-          publicUrl: uploaded.publicUrl,
-          sha256: uploaded.sha256,
-          contentType: mimeType,
-          sizeBytes: body.length,
-          etag: uploaded.etag,
-          width,
-          height,
-          originalFilename: filename,
-        });
 
     ok(res, {
       filename,
@@ -136,7 +128,10 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
       storageFileId: uploaded.storageFileId ?? null,
       sha256: uploaded.sha256,
       deduped: uploaded.deduped,
-      mediaId: mediaRow?.id ?? null,
+      repaired: uploaded.repaired,
+      migrated: uploaded.migrated,
+      mediaId: uploaded.mediaId,
+      storageBackend: uploaded.storageBackend,
       imageHints: {
         maxWidth: IMAGE_MAX_WIDTH,
         maxHeight: IMAGE_MAX_HEIGHT,
@@ -146,7 +141,10 @@ export default async function adminUploadImage(req: Request, res: Response): Pro
   } catch (error) {
     console.error("[admin/upload/image]", error);
     const message = error instanceof Error ? error.message : "Internal server error";
-    const isStorage = message.includes("Storage") || message.includes("S3 PutObject");
+    const isStorage =
+      message.includes("Storage") ||
+      message.includes("S3 PutObject") ||
+      message.includes("media asset catalog");
     fail(res, isStorage ? message : "Internal server error", isStorage ? 502 : 500);
   }
 }

@@ -17,14 +17,12 @@ export type NhostFileMetadata = {
   isUploaded?: boolean;
 };
 
-export type NhostUploadResult = {
+export type NhostPostedFile = {
   storageFileId: string;
   storageKey: string;
   publicUrl: string;
   etag?: string;
   sha256: string;
-  deduped: boolean;
-  mediaId?: string;
 };
 
 function buildPublicFileUrl(fileId: string): string {
@@ -84,18 +82,41 @@ function storageAdminHeaders(): HeadersInit {
   };
 }
 
+/** True when the file id exists in Nhost Storage (admin secret). */
+export async function nhostStorageFileExists(fileId: string): Promise<boolean> {
+  const storageBase = getStorageBaseUrl();
+  if (!storageBase) return false;
+
+  const id = fileId.trim();
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return false;
+
+  const headers = storageAdminHeaders();
+  const url = `${storageBase}/files/${id}`;
+
+  try {
+    const head = await fetch(url, { method: "HEAD", headers });
+    if (head.ok) return true;
+    if (head.status === 404) return false;
+    const get = await fetch(url, { method: "GET", headers });
+    return get.ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Upload bytes to Nhost Storage (POST /v1/files multipart).
  * File `name` is the monolith-compatible logical path (e.g. uploads/by-hash/…).
+ * Does not read or write Hasura — use {@link uploadMediaFile} for catalog sync.
  */
-export async function uploadFileToNhostStorage(input: {
+export async function postMultipartToNhostStorage(input: {
   body: Buffer;
   mimeType: string;
   logicalPath: string;
   bucketId?: string;
   originalFilename?: string;
   sha256?: string;
-}): Promise<NhostUploadResult> {
+}): Promise<NhostPostedFile> {
   const storageBase = getStorageBaseUrl();
   if (!storageBase) {
     throw new Error("Nhost Storage is not configured (NHOST_STORAGE_URL or NHOST_SUBDOMAIN+REGION)");
@@ -105,21 +126,6 @@ export async function uploadFileToNhostStorage(input: {
   const sha256 =
     input.sha256?.trim() || createHash("sha256").update(input.body).digest("hex");
   const logicalPath = input.logicalPath || buildHashStorageKey(sha256, input.mimeType);
-
-  const existing = await findExistingMediaBySha256(sha256);
-  if (existing) {
-    const storageFileId =
-      parseStorageFileIdFromPublicUrl(existing.publicUrl) ?? existing.storageKey;
-    return {
-      storageFileId,
-      storageKey: existing.storageKey,
-      publicUrl: existing.publicUrl,
-      etag: existing.etag,
-      sha256,
-      deduped: true,
-      mediaId: existing.mediaId,
-    };
-  }
 
   const metadata = JSON.stringify({
     name: logicalPath,
@@ -169,9 +175,11 @@ export async function uploadFileToNhostStorage(input: {
     publicUrl: buildPublicFileUrl(file.id),
     etag: file.etag,
     sha256,
-    deduped: false,
   };
 }
+
+/** @deprecated Use postMultipartToNhostStorage — dedup is handled in media-storage. */
+export const uploadFileToNhostStorage = postMultipartToNhostStorage;
 
 const STORAGE_TRANSFORM_PARAMS = new Set(["w", "h", "f", "q", "blur"]);
 

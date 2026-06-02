@@ -2,9 +2,10 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { requireAdminRole, getUserId } from "../../_lib/auth";
 import { isAllowed } from "../../_lib/ratelimit";
-import { isMediaUploadConfigured } from "../../_lib/media-storage";
+import { getUploadBackend, isMediaUploadConfigured } from "../../_lib/media-storage";
+import { isNhostStoragePublicUrl } from "../../_lib/media-url";
+import { parseStorageFileIdFromPublicUrl, nhostStorageFileExists } from "../../_lib/nhost-storage";
 import { insertMediaAsset } from "../../_lib/media-assets";
-import { parseStorageFileIdFromPublicUrl } from "../../_lib/nhost-storage";
 import { isAllowedMime } from "../../_lib/upload-policy";
 import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
@@ -51,6 +52,23 @@ export default async function adminUploadRegister(req: Request, res: Response): 
     if (!isAllowedMime(body.mimeType)) {
       fail(res, "MIME type not allowed", 400);
       return;
+    }
+
+    if (getUploadBackend() === "nhost") {
+      fail(
+        res,
+        "Register is not used with Nhost Storage. Upload via POST /v1/admin/upload/image (proxy).",
+        400
+      );
+      return;
+    }
+
+    if (isNhostStoragePublicUrl(body.publicUrl)) {
+      const fileId = parseStorageFileIdFromPublicUrl(body.publicUrl);
+      if (!fileId || !(await nhostStorageFileExists(fileId))) {
+        fail(res, "publicUrl does not reference an existing Nhost Storage file", 400);
+        return;
+      }
     }
 
     const mediaRow = await insertMediaAsset({
