@@ -13,8 +13,27 @@ const GET_BY_UUID = `
       first_name
       last_name
       email
-      phone_number
       photo_url
+      auth_provider
+      phone_number
+      location
+      about
+      education
+      occupation
+      marital_status
+      languages
+      verified
+      rating
+      review_count
+      response_rate
+      response_time
+      avg_response_time
+      total_properties
+      total_guests
+      onboarding_complete
+      preferences
+      notification_settings
+      privacy_settings
       created_at
       updated_at
     }

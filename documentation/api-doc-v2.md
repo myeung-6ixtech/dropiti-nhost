@@ -590,9 +590,29 @@ All routes require `Authorization: Bearer <nhost_access_token>` unless marked **
 | Method | Path | Auth | Request |
 |---|---|---|---|
 | `POST` | `/v1/client/users/create-user` | Bearer | Body: `{ email, name, ... }` — `userId` from JWT |
-| `GET` | `/v1/client/users/get-user-by-id` | Bearer | Query: `?id=` |
-| `GET` | `/v1/client/users/get-user-by-uuid` | Bearer | Query: `?uuid=` |
+| `GET` | `/v1/client/users/get-user-by-id` | Bearer | Query: `?nhost_user_id=<uuid>` **or** `?id=<int>` — self-only when `nhost_user_id` used |
+| `GET` | `/v1/client/users/get-user-by-uuid` | Bearer | Query: `?uuid=<real_estate_user.uuid>` |
 | `PATCH` | `/v1/client/users/update-user` | Bearer | Body: profile fields — scoped to JWT user |
+
+#### `GET /v1/client/users/get-user-by-id` — query params
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `nhost_user_id` | UUID string | Nhost auth user id (`auth.users.id`). JWT `x-hasura-user-id` must equal this value. **Preferred for post-login profile load.** |
+| `id` | Integer | Hasura numeric PK on `real_estate_user`. Kept for admin/legacy use. |
+
+#### Response fields (both `get-user-by-id` and `get-user-by-uuid`)
+
+Both endpoints return the full `real_estate_user` row inside `{ ok: true, data: <row> }`:
+
+```
+uuid, nhost_user_id, display_name, first_name, last_name, email,
+photo_url, auth_provider, phone_number, location, about, education,
+occupation, marital_status, languages, verified, rating, review_count,
+response_rate, response_time, avg_response_time, total_properties,
+total_guests, onboarding_complete, preferences, notification_settings,
+privacy_settings, created_at, updated_at
+```
 
 ### Properties
 

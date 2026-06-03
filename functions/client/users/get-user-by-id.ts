@@ -1,22 +1,53 @@
 import type { Request, Response } from "express";
-import { requireAuth } from "../../_lib/auth";
+import { requireAuth, getUserId } from "../../_lib/auth";
 import { hasuraQuery } from "../../_lib/hasura";
-import { queryInt } from "../../_lib/parse-query";
+import { queryInt, queryString, UUID_RE } from "../../_lib/parse-query";
 import { ok, fail } from "../../_lib/respond";
 
-const GET_BY_ID = `
-  query GetUserById($id: Int!) {
+const FULL_USER_FIELDS = `
+  uuid
+  nhost_user_id
+  display_name
+  first_name
+  last_name
+  email
+  photo_url
+  auth_provider
+  phone_number
+  location
+  about
+  education
+  occupation
+  marital_status
+  languages
+  verified
+  rating
+  review_count
+  response_rate
+  response_time
+  avg_response_time
+  total_properties
+  total_guests
+  onboarding_complete
+  preferences
+  notification_settings
+  privacy_settings
+  created_at
+  updated_at
+`;
+
+const GET_BY_NUMERIC_ID = `
+  query GetUserByNumericId($id: Int!) {
     real_estate_user(where: { id: { _eq: $id } }, limit: 1) {
-      uuid
-      nhost_user_id
-      display_name
-      first_name
-      last_name
-      email
-      phone_number
-      photo_url
-      created_at
-      updated_at
+      ${FULL_USER_FIELDS}
+    }
+  }
+`;
+
+const GET_BY_NHOST_USER_ID = `
+  query GetUserByNhostUserId($nhost_user_id: uuid!) {
+    real_estate_user(where: { nhost_user_id: { _eq: $nhost_user_id } }, limit: 1) {
+      ${FULL_USER_FIELDS}
     }
   }
 `;
@@ -26,19 +57,50 @@ export default async function getUserById(req: Request, res: Response): Promise<
     const payload = await requireAuth(req, res);
     if (!payload) return;
 
-    const id = queryInt(req, "id");
-    if (id === null) {
-      fail(res, "id is required", 400);
+    const nhostUserId = queryString(req, "nhost_user_id");
+    const numericId = queryInt(req, "id");
+
+    if (!nhostUserId && numericId === null) {
+      fail(res, "Either nhost_user_id or id is required", 400);
       return;
     }
 
-    const result = await hasuraQuery<{ real_estate_user?: unknown[] }>(GET_BY_ID, { id });
-    if (result.errors?.length) {
-      fail(res, "Failed to fetch user", 500);
-      return;
+    let user: unknown;
+
+    if (nhostUserId) {
+      if (!UUID_RE.test(nhostUserId)) {
+        fail(res, "nhost_user_id must be a valid UUID", 400);
+        return;
+      }
+
+      // Self-check: the JWT user may only look up their own record unless admin
+      const jwtUserId = getUserId(payload);
+      if (jwtUserId && jwtUserId !== nhostUserId) {
+        fail(res, "Forbidden", 403);
+        return;
+      }
+
+      const result = await hasuraQuery<{ real_estate_user?: unknown[] }>(
+        GET_BY_NHOST_USER_ID,
+        { nhost_user_id: nhostUserId }
+      );
+      if (result.errors?.length) {
+        fail(res, "Failed to fetch user", 500);
+        return;
+      }
+      user = result.data?.real_estate_user?.[0];
+    } else {
+      const result = await hasuraQuery<{ real_estate_user?: unknown[] }>(
+        GET_BY_NUMERIC_ID,
+        { id: numericId }
+      );
+      if (result.errors?.length) {
+        fail(res, "Failed to fetch user", 500);
+        return;
+      }
+      user = result.data?.real_estate_user?.[0];
     }
 
-    const user = result.data?.real_estate_user?.[0];
     if (!user) {
       fail(res, "User not found", 404);
       return;
