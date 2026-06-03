@@ -9,11 +9,21 @@ const UpdateUserSchema = z
   .object({
     display_name: z.string().min(1).optional(),
     first_name: z.string().optional(),
+    middle_name: z.string().optional(),
     last_name: z.string().optional(),
     photo_url: z.string().optional(),
     phone_number: z.string().optional(),
+    whatsapp_number: z.string().nullable().optional(),
     location: z.string().optional(),
     about: z.string().optional(),
+    education: z.string().optional(),
+    occupation: z.string().optional(),
+    marital_status: z.string().optional(),
+    languages: z.union([z.array(z.string()), z.string()]).optional(),
+    onboarding_complete: z.boolean().optional(),
+    preferences: z.record(z.unknown()).optional(),
+    notification_settings: z.record(z.unknown()).optional(),
+    privacy_settings: z.record(z.unknown()).optional(),
   })
   .refine((o) => Object.keys(o).length > 0, { message: "At least one field required" });
 

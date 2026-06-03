@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
-import { requireAuth, getUserId } from "../../_lib/auth";
+import { requireAuth } from "../../_lib/auth";
+import { optionalAuth } from "../../_lib/optional-auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { queryInt, queryString, UUID_RE } from "../../_lib/parse-query";
 import { ok, fail } from "../../_lib/respond";
@@ -54,14 +55,11 @@ const GET_BY_NHOST_USER_ID = `
 
 export default async function getUserById(req: Request, res: Response): Promise<void> {
   try {
-    const payload = await requireAuth(req, res);
-    if (!payload) return;
-
     const nhostUserId = queryString(req, "nhost_user_id");
     const numericId = queryInt(req, "id");
 
     if (!nhostUserId && numericId === null) {
-      fail(res, "Either nhost_user_id or id is required", 400);
+      fail(res, "nhost_user_id or id is required", 400);
       return;
     }
 
@@ -73,12 +71,7 @@ export default async function getUserById(req: Request, res: Response): Promise<
         return;
       }
 
-      // Self-check: the JWT user may only look up their own record unless admin
-      const jwtUserId = getUserId(payload);
-      if (jwtUserId && jwtUserId !== nhostUserId) {
-        fail(res, "Forbidden", 403);
-        return;
-      }
+      await optionalAuth(req, res);
 
       const result = await hasuraQuery<{ real_estate_user?: unknown[] }>(
         GET_BY_NHOST_USER_ID,
@@ -90,6 +83,9 @@ export default async function getUserById(req: Request, res: Response): Promise<
       }
       user = result.data?.real_estate_user?.[0];
     } else {
+      const payload = await requireAuth(req, res);
+      if (!payload) return;
+
       const result = await hasuraQuery<{ real_estate_user?: unknown[] }>(
         GET_BY_NUMERIC_ID,
         { id: numericId }

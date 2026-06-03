@@ -590,8 +590,11 @@ All routes require `Authorization: Bearer <nhost_access_token>` unless marked **
 | Method | Path | Auth | Request |
 |---|---|---|---|
 | `POST` | `/v1/client/users/create-user` | Bearer | Body: `{ email, name, ... }` — `userId` from JWT |
-| `GET` | `/v1/client/users/get-user-by-id` | Bearer | Query: `?nhost_user_id=<uuid>` **or** `?id=<int>` — self-only when `nhost_user_id` used |
-| `GET` | `/v1/client/users/get-user-by-uuid` | Bearer | Query: `?uuid=<real_estate_user.uuid>` |
+| `GET` | `/v1/client/users/get-user-by-id` | Optional† / Bearer‡ | Query: `?nhost_user_id=<uuid>` or `?id=<int>` |
+| `GET` | `/v1/client/users/get-user-by-uuid` | — | **Deprecated (410)** — use `get-user-by-id?nhost_user_id=` |
+
+† `?nhost_user_id=` — `optionalAuth`; public `/user/[id]` profiles.  
+‡ `?id=` (numeric PK) — `requireAuth`; admin/internal only.
 | `PATCH` | `/v1/client/users/update-user` | Bearer | Body: profile fields — scoped to JWT user |
 
 #### `GET /v1/client/users/get-user-by-id` — query params
@@ -601,7 +604,7 @@ All routes require `Authorization: Bearer <nhost_access_token>` unless marked **
 | `nhost_user_id` | UUID string | Nhost auth user id (`auth.users.id`). JWT `x-hasura-user-id` must equal this value. **Preferred for post-login profile load.** |
 | `id` | Integer | Hasura numeric PK on `real_estate_user`. Kept for admin/legacy use. |
 
-#### Response fields (both `get-user-by-id` and `get-user-by-uuid`)
+#### Response fields (`get-user-by-id`)
 
 Both endpoints return the full `real_estate_user` row inside `{ ok: true, data: <row> }`:
 
@@ -622,7 +625,7 @@ privacy_settings, created_at, updated_at
 | `GET` | `/v1/client/properties/get-drafts` | Bearer | JWT user's drafts only |
 | `DELETE` | `/v1/client/properties/delete-draft` | Bearer | Query: `?property_uuid=` — ownership checked |
 | `POST` | `/v1/client/properties/publish-draft` | Bearer | Body: `{ propertyUuid }` |
-| `GET` | `/v1/client/properties/get-listings` | Optional | Query: `?limit=&offset=` |
+| `GET` | `/v1/client/properties/get-listings` | Optional | Query: `?limit=&offset=&minPrice=&maxPrice=&bedrooms=&type=&landlord_user_id=` (`bedrooms` → `num_bedroom` _gte) |
 | `GET` | `/v1/client/properties/get-property` | Optional | Query: `?id=` |
 | `GET` | `/v1/client/properties/get-property-by-uuid` | Optional | Query: `?uuid=` |
 | `PATCH` | `/v1/client/properties/update-property` | Bearer | Body: fields — ownership checked |
@@ -648,6 +651,24 @@ privacy_settings, created_at, updated_at
 | `DELETE` | `/v1/client/reviews/delete-review` | Bearer | Query: `?reviewId=` — own review |
 | `GET` | `/v1/client/reviews/get-reviews-by-property` | Optional | Query: `?propertyUuid=` |
 | `GET` | `/v1/client/reviews/get-reviews-by-user` | Optional | Query: `?userId=` |
+
+### Tenants
+
+| Method | Path | Auth | Request |
+|---|---|---|---|
+| `GET` | `/v1/client/tenants` | Optional | Query: `?limit=&offset=&status=` (default `active`), `budget_min`, `budget_max`, `location`, `move_in_date`, `property_type` — marketplace feed; returns `{ items, pagination }` with embedded `user` |
+| `GET` | `/v1/client/tenants/profile` | Optional / Bearer | Query: `?nhost_user_id=<uuid>` (public **active** profiles) or omit param (JWT user's own profile, any status) |
+| `POST` | `/v1/client/tenants/profile` | Bearer | Body: tenant profile fields; optional `user_nhost_user_id` (must match JWT) — insert or update |
+| `PATCH` | `/v1/client/tenants/profile` | Bearer | Body: partial tenant profile fields — JWT user only |
+
+`real_estate_tenant_profile.user_id` is the Nhost auth user id (`auth.users.id`).
+
+#### `GET /v1/client/tenants/profile` — query params
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `nhost_user_id` | UUID | Lookup by `user_id`. Anonymous may read **active** listings only; draft/inactive require JWT owner. |
+| *(none)* | — | Requires Bearer; returns the authenticated user's profile. |
 
 ### Transfer of Ownership (client-facing)
 
