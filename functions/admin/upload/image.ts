@@ -21,14 +21,23 @@ function parseOptionalInt(value: unknown): number | undefined {
 }
 
 function readRawBody(req: Request): Promise<Buffer | null> {
+  // 1. Some Nhost runtime versions expose the raw bytes via req.rawBody.
   const raw = (req as Request & { rawBody?: Buffer }).rawBody;
   if (Buffer.isBuffer(raw) && raw.length > 0) {
     return Promise.resolve(raw);
   }
 
+  // 2. Runtimes that use express.raw({ type: "*/*" }) store the Buffer in req.body
+  //    and consume the stream — so we must check here before falling back to streaming.
+  const bodyBuf = (req as Request & { body?: unknown }).body;
+  if (Buffer.isBuffer(bodyBuf) && bodyBuf.length > 0) {
+    return Promise.resolve(bodyBuf);
+  }
+
+  // 3. Stream fallback for runtimes that leave the body unconsumed.
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    req.on("data", (chunk: unknown) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array)));
     req.on("end", () => {
       const body = Buffer.concat(chunks);
       resolve(body.length > 0 ? body : null);

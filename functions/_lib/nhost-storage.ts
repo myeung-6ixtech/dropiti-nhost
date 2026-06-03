@@ -208,35 +208,37 @@ export async function postMultipartToNhostStorage(input: {
   const boundary = `DropitiBoundary${createHash("sha256").update(sha256).digest("hex").slice(0, 24)}`;
   const CRLF = "\r\n";
 
-  const preamble = [
-    `--${boundary}`,
-    `Content-Disposition: form-data; name="bucket-id"`,
-    ``,
-    bucketId,
-    `--${boundary}`,
-    `Content-Disposition: form-data; name="metadata[]"`,
-    ``,
-    metadata,
-    `--${boundary}`,
-    `Content-Disposition: form-data; name="file[]"; filename="${partFilename}"`,
-    `Content-Type: ${input.mimeType}`,
-    ``,
-    ``,
-  ].join(CRLF);
+  // Use utf8 encoding so non-ASCII characters in filenames / metadata are preserved
+  // correctly rather than getting truncated to their low byte (latin1 / "binary").
+  const preamble = Buffer.from(
+    [
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="bucket-id"`,
+      ``,
+      bucketId,
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="metadata[]"`,
+      ``,
+      metadata,
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="file[]"; filename="${partFilename}"`,
+      `Content-Type: ${input.mimeType}`,
+      ``,
+      ``,
+    ].join(CRLF),
+    "utf8"
+  );
 
-  const epilogue = `${CRLF}--${boundary}--${CRLF}`;
+  const epilogue = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf8");
 
-  const rawBody = Buffer.concat([
-    Buffer.from(preamble, "binary"),
-    input.body,
-    Buffer.from(epilogue, "binary"),
-  ]);
+  const rawBody = Buffer.concat([preamble, input.body, epilogue]);
 
   const res = await fetch(`${storageBase}/files`, {
     method: "POST",
     headers: {
       ...storageAdminHeaders(),
       "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      "Content-Length": String(rawBody.byteLength),
     },
     body: rawBody,
   });
