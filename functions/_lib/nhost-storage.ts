@@ -25,35 +25,6 @@ export type NhostPostedFile = {
   sha256: string;
 };
 
-/**
- * Create a form-data file entry whose Content-Type is reliably forwarded.
- *
- * In Node.js 18's undici-based fetch, a plain Blob's `type` is sometimes
- * lost when the multipart body is serialised, causing hasura-storage to fall
- * back to `application/octet-stream`.  Using a `File` object avoids this:
- * undici has an explicit code-path for `File` that propagates `.type` to the
- * `Content-Type` header of the corresponding form part.
- *
- * - Node.js 20+: `File` is a global.
- * - Node.js 18.7+: `File` is in `node:buffer` (experimental but available).
- * - Older / unavailable: fall back to `Blob` (best-effort).
- */
-function makeFilePart(bytes: Uint8Array, filename: string, mimeType: string): Blob {
-  // Slice to a plain ArrayBuffer so it satisfies the strict BlobPart type.
-  const buf: ArrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-  if (typeof File !== "undefined") {
-    return new File([buf], filename, { type: mimeType });
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("node:buffer") as unknown as { File?: new (bits: ArrayBuffer[], name: string, opts?: { type?: string }) => Blob };
-    if (mod.File) return new mod.File([buf], filename, { type: mimeType });
-  } catch {
-    // node:buffer.File not available — fall through to Blob
-  }
-  return new Blob([buf], { type: mimeType });
-}
-
 function buildPublicFileUrl(fileId: string): string {
   const base = getStorageBaseUrl();
   if (!base) throw new Error("Nhost Storage URL is not configured");
@@ -164,10 +135,8 @@ export async function postMultipartToNhostStorage(input: {
     },
   });
 
-  // Derive a filename that carries the correct extension.
-  // Use the original filename if supplied (e.g. "photo.jpeg"), otherwise build
-  // one from the MIME type extension so hasura-storage can also infer the type
-  // from the filename as a secondary signal.
+  // Build a filename that carries the right extension so hasura-storage can
+  // infer the MIME type from the name as a secondary signal.
   const ext = extensionFromMime(input.mimeType);
   const partFilename = input.originalFilename
     ? /\.[a-z0-9]+$/i.test(input.originalFilename)
@@ -175,20 +144,46 @@ export async function postMultipartToNhostStorage(input: {
       : `${input.originalFilename}.${ext}`
     : `upload.${ext}`;
 
-  const form = new FormData();
-  form.append("bucket-id", bucketId);
-  form.append("metadata[]", metadata);
-  const bytes = Uint8Array.from(input.body);
-  // makeFilePart uses File (not Blob) so undici forwards the MIME type as the
-  // Content-Type header of the multipart part.  Blob's type is silently dropped
-  // by some Node.js 18 undici versions, resulting in application/octet-stream
-  // being stored in storage.files.mimeType.
-  form.append("file[]", makeFilePart(bytes, partFilename, input.mimeType), partFilename);
+  // Construct the multipart body as raw bytes instead of using the FormData
+  // API.  Node.js 18's undici-backed FormData has a known gap where Blob/File
+  // `.type` is not reliably forwarded to the part's Content-Type header,
+  // causing hasura-storage to store `application/octet-stream` regardless of
+  // what MIME type we pass.  Writing the boundary and headers ourselves
+  // guarantees `Content-Type: image/jpeg` (or webp, png, …) in the wire bytes.
+  const boundary = `DropitiBoundary${createHash("sha256").update(sha256).digest("hex").slice(0, 24)}`;
+  const CRLF = "\r\n";
+
+  const preamble = [
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="bucket-id"`,
+    ``,
+    bucketId,
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="metadata[]"`,
+    ``,
+    metadata,
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="file[]"; filename="${partFilename}"`,
+    `Content-Type: ${input.mimeType}`,
+    ``,
+    ``,
+  ].join(CRLF);
+
+  const epilogue = `${CRLF}--${boundary}--${CRLF}`;
+
+  const rawBody = Buffer.concat([
+    Buffer.from(preamble, "binary"),
+    input.body,
+    Buffer.from(epilogue, "binary"),
+  ]);
 
   const res = await fetch(`${storageBase}/files`, {
     method: "POST",
-    headers: storageAdminHeaders(),
-    body: form,
+    headers: {
+      ...storageAdminHeaders(),
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    },
+    body: rawBody,
   });
 
   const text = await res.text();
