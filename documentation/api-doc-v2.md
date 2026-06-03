@@ -627,7 +627,7 @@ privacy_settings, created_at, updated_at
 | `POST` | `/v1/client/properties/publish-draft` | Bearer | Body: `{ propertyUuid }` |
 | `GET` | `/v1/client/properties/get-listings` | Optional | Query: `?limit=&offset=&minPrice=&maxPrice=&bedrooms=&type=&landlord_user_id=` (`bedrooms` → `num_bedroom` _gte) |
 | `GET` | `/v1/client/properties/get-property` | Optional | Query: `?id=` |
-| `GET` | `/v1/client/properties/get-property-by-uuid` | Optional | Query: `?uuid=` |
+| `GET` | `/v1/client/properties/get-property-by-uuid` | Optional | Query: `?uuid=` (alias `property_uuid`); returns `{ property, landlord }` |
 | `PATCH` | `/v1/client/properties/update-property` | Bearer | Body: fields — ownership checked |
 
 ### Offers
@@ -669,6 +669,20 @@ privacy_settings, created_at, updated_at
 |-------|------|-------------|
 | `nhost_user_id` | UUID | Lookup by `user_id`. Anonymous may read **active** listings only; draft/inactive require JWT owner. |
 | *(none)* | — | Requires Bearer; returns the authenticated user's profile. |
+
+Each tenant profile row includes a nested **`user`** object (Hasura relationship → `auth.users`):
+
+```json
+{
+  "user": {
+    "id": "<uuid>",
+    "email": "user@example.com",
+    "avatarUrl": "https://..."
+  }
+}
+```
+
+`user.id` matches `real_estate_tenant_profile.user_id` (Nhost auth user id).
 
 ### Transfer of Ownership (client-facing)
 

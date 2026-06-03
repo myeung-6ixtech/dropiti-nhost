@@ -42,10 +42,20 @@ const FULL_TENANT_PROFILE_FIELDS = `
   updated_at
 `;
 
+/** Hasura object relationship on `real_estate_tenant_profile` → `auth.users`. */
+const TENANT_PROFILE_USER_FIELDS = `
+  user {
+    id
+    email
+    avatarUrl
+  }
+`;
+
 const GET_PROFILE_BY_USER = `
   query TenantProfileByUser($user_id: uuid!) {
     real_estate_tenant_profile(where: { user_id: { _eq: $user_id } }, limit: 1) {
       ${FULL_TENANT_PROFILE_FIELDS}
+      ${TENANT_PROFILE_USER_FIELDS}
     }
   }
 `;
@@ -54,6 +64,7 @@ const INSERT_PROFILE = `
   mutation InsertTenantProfile($object: real_estate_tenant_profile_insert_input!) {
     insert_real_estate_tenant_profile_one(object: $object) {
       ${FULL_TENANT_PROFILE_FIELDS}
+      ${TENANT_PROFILE_USER_FIELDS}
     }
   }
 `;
@@ -66,6 +77,7 @@ const UPDATE_PROFILE = `
     ) {
       returning {
         ${FULL_TENANT_PROFILE_FIELDS}
+        ${TENANT_PROFILE_USER_FIELDS}
       }
     }
   }

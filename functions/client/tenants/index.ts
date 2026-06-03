@@ -39,6 +39,14 @@ const FULL_TENANT_LIST_FIELDS = `
   updated_at
 `;
 
+const TENANT_PROFILE_USER_FIELDS = `
+  user {
+    id
+    email
+    avatarUrl
+  }
+`;
+
 const LIST_TENANTS = `
   query ListTenantProfiles(
     $limit: Int!
@@ -52,25 +60,12 @@ const LIST_TENANTS = `
       order_by: { created_at: desc }
     ) {
       ${FULL_TENANT_LIST_FIELDS}
+      ${TENANT_PROFILE_USER_FIELDS}
     }
     real_estate_tenant_profile_aggregate(where: $filters) {
       aggregate {
         count
       }
-    }
-  }
-`;
-
-const USERS_FOR_TENANTS = `
-  query UsersForTenantProfiles($ids: [uuid!]!) {
-    real_estate_user(where: { nhost_user_id: { _in: $ids } }) {
-      uuid
-      nhost_user_id
-      display_name
-      photo_url
-      email
-      rating
-      review_count
     }
   }
 `;
@@ -152,34 +147,8 @@ export default async function tenantsIndex(
       result.data?.real_estate_tenant_profile_aggregate?.aggregate?.count ??
       items.length;
 
-    const userIds = items
-      .map((row) => row.user_id)
-      .filter((id): id is string => typeof id === "string" && id.length > 0);
-
-    let userById: Record<string, Record<string, unknown>> = {};
-    if (userIds.length > 0) {
-      const userResult = await hasuraQuery<{
-        real_estate_user?: Array<Record<string, unknown>>;
-      }>(USERS_FOR_TENANTS, { ids: userIds });
-
-      if (!userResult.errors?.length) {
-        for (const user of userResult.data?.real_estate_user ?? []) {
-          const nhostId = user.nhost_user_id as string | undefined;
-          if (nhostId) userById[nhostId] = user;
-        }
-      }
-    }
-
-    const enriched = items.map((row) => {
-      const uid = row.user_id as string | undefined;
-      return {
-        ...row,
-        user: uid ? userById[uid] ?? null : null,
-      };
-    });
-
     ok(res, {
-      items: enriched,
+      items,
       pagination: {
         total,
         limit,
