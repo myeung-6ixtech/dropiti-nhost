@@ -11,6 +11,7 @@ import {
   nhostStorageFileExists,
   parseStorageFileIdFromPublicUrl,
   postMultipartToNhostStorage,
+  repairStorageFileMimeType,
   createNhostBatchSlot,
 } from "./nhost-storage";
 import { isLegacyS3MediaUrl, isNhostStoragePublicUrl } from "./media-url";
@@ -110,6 +111,13 @@ async function uploadMediaFileNhost(input: {
     if (existingFileId && isNhostStoragePublicUrl(existing.publicUrl)) {
       const exists = await nhostStorageFileExists(existingFileId);
       if (exists) {
+        // Opportunistically fix storage.files.mime_type when it was stored as
+        // application/octet-stream by older code (pre-raw-multipart fix).
+        // Fire-and-forget — a failure here must never block the dedup response.
+        repairStorageFileMimeType(existingFileId, input.mimeType).catch((err) => {
+          console.warn("[media] mime_type repair skipped:", (err as Error).message);
+        });
+
         return {
           storageKey: existing.storageKey,
           publicUrl: existing.publicUrl,

@@ -82,6 +82,61 @@ function storageAdminHeaders(): HeadersInit {
   };
 }
 
+// ─── storage.files mimeType repair ──────────────────────────────────────────
+
+const GET_STORAGE_FILE_MIME = `
+  query GetStorageFileMime($id: uuid!) {
+    storage_files_by_pk(id: $id) {
+      mime_type
+    }
+  }
+`;
+
+const UPDATE_STORAGE_FILE_MIME = `
+  mutation UpdateStorageFileMime($id: uuid!, $mime_type: String!) {
+    update_storage_files_by_pk(
+      pk_columns: { id: $id }
+      _set: { mime_type: $mime_type }
+    ) {
+      id
+    }
+  }
+`;
+
+/**
+ * If `storage.files.mime_type` is `application/octet-stream` but the correct
+ * MIME type is known, update it in-place via Hasura.
+ *
+ * This repairs files uploaded by older code before the raw-multipart fix.
+ * It is safe to call on every dedup hit — it is a no-op when the mimeType is
+ * already correct.  Returns true when an update was actually performed.
+ */
+export async function repairStorageFileMimeType(
+  fileId: string,
+  correctMimeType: string
+): Promise<boolean> {
+  if (!correctMimeType || correctMimeType === "application/octet-stream") return false;
+
+  const current = await hasuraQuery<{
+    storage_files_by_pk?: { mime_type: string } | null;
+  }>(GET_STORAGE_FILE_MIME, { id: fileId });
+
+  const storedMime = current.data?.storage_files_by_pk?.mime_type;
+  if (!storedMime || storedMime !== "application/octet-stream") return false;
+
+  const result = await hasuraQuery<{
+    update_storage_files_by_pk?: { id: string } | null;
+  }>(UPDATE_STORAGE_FILE_MIME, { id: fileId, mime_type: correctMimeType });
+
+  const repaired = Boolean(result.data?.update_storage_files_by_pk?.id);
+  if (repaired) {
+    console.log(`[nhost-storage] repaired mime_type for ${fileId}: application/octet-stream → ${correctMimeType}`);
+  }
+  return repaired;
+}
+
+// ─── existence check ─────────────────────────────────────────────────────────
+
 /** True when the file id exists in Nhost Storage (admin secret). */
 export async function nhostStorageFileExists(fileId: string): Promise<boolean> {
   const storageBase = getStorageBaseUrl();
