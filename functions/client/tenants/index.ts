@@ -3,6 +3,7 @@ import { optionalAuth } from "../../_lib/optional-auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { parsePagination, queryString } from "../../_lib/parse-query";
 import { ok, fail } from "../../_lib/respond";
+import { enrichTenantProfilesWithUsers } from "../../_lib/enrich-tenant-profile-users";
 
 const FULL_TENANT_LIST_FIELDS = `
   id
@@ -142,7 +143,8 @@ export default async function tenantsIndex(
       return;
     }
 
-    const items = result.data?.real_estate_tenant_profile ?? [];
+    const rawItems = result.data?.real_estate_tenant_profile ?? [];
+    const items = await enrichTenantProfilesWithUsers(rawItems);
     const total =
       result.data?.real_estate_tenant_profile_aggregate?.aggregate?.count ??
       items.length;

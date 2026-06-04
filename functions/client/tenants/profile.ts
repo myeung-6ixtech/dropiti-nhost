@@ -6,6 +6,7 @@ import { hasuraQuery } from "../../_lib/hasura";
 import { queryString, UUID_RE } from "../../_lib/parse-query";
 import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
+import { enrichTenantProfileWithUser } from "../../_lib/enrich-tenant-profile-users";
 
 const FULL_TENANT_PROFILE_FIELDS = `
   id
@@ -199,7 +200,7 @@ export default async function tenantProfile(
         return;
       }
 
-      ok(res, profile);
+      ok(res, await enrichTenantProfileWithUser(profile));
       return;
     }
 
@@ -238,7 +239,7 @@ export default async function tenantProfile(
           fail(res, "Profile not found", 404);
           return;
         }
-        ok(res, row);
+        ok(res, await enrichTenantProfileWithUser(row));
         return;
       }
 
@@ -258,7 +259,12 @@ export default async function tenantProfile(
         return;
       }
 
-      ok(res, result.data.insert_real_estate_tenant_profile_one);
+      ok(
+        res,
+        await enrichTenantProfileWithUser(
+          result.data.insert_real_estate_tenant_profile_one as Record<string, unknown>
+        )
+      );
       return;
     }
 
@@ -287,7 +293,7 @@ export default async function tenantProfile(
         fail(res, "Profile not found", 404);
         return;
       }
-      ok(res, row);
+      ok(res, await enrichTenantProfileWithUser(row));
       return;
     }
 
