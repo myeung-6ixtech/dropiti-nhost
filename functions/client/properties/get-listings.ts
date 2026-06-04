@@ -14,6 +14,8 @@ export default async function getListings(req: Request, res: Response): Promise<
     const bedrooms = queryString(req, "bedrooms");
     const type = queryString(req, "type");
     const landlordUserId = queryString(req, "landlord_user_id");
+    const location = queryString(req, "location");
+    const keyword = queryString(req, "keyword");
 
     const { items, total } = await listPublishedProperties(limit, offset, {
       minPrice: minPrice ? parseFloat(minPrice) : undefined,
@@ -21,6 +23,8 @@ export default async function getListings(req: Request, res: Response): Promise<
       bedrooms: bedrooms ? parseInt(bedrooms, 10) : undefined,
       type: type ?? undefined,
       landlordUserId: landlordUserId ?? undefined,
+      location: location ?? undefined,
+      keyword: keyword ?? undefined,
     });
 
     ok(res, {
