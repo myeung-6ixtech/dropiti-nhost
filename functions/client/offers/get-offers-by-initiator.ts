@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { requireAuth, getUserId } from "../../_lib/auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { OFFER_FIELDS } from "../../_lib/offers-core";
+import { enrichOffersWithDetails } from "../../_lib/enrich-offers";
 import { ok, fail } from "../../_lib/respond";
 
 const GET_BY_INITIATOR = `
@@ -38,7 +39,12 @@ export default async function getOffersByInitiator(
       return;
     }
 
-    ok(res, { items: result.data?.real_estate_offer ?? [] });
+    const rawItems = result.data?.real_estate_offer ?? [];
+    const items = await enrichOffersWithDetails(
+      rawItems as Parameters<typeof enrichOffersWithDetails>[0]
+    );
+
+    ok(res, { items });
   } catch (error) {
     console.error("[client/offers/get-offers-by-initiator]", error);
     fail(res, "Internal server error", 500);
