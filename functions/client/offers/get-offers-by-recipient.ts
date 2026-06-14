@@ -1,0 +1,76 @@
+import type { Request, Response } from "express";
+import { requireAuth, getUserId } from "../../_lib/auth";
+import { hasuraQuery } from "../../_lib/hasura";
+import { OFFER_FIELDS } from "../../_lib/offers-core";
+import { enrichOffersWithDetails } from "../../_lib/enrich-offers";
+import { ok, fail } from "../../_lib/respond";
+
+const GET_BY_RECIPIENT = `
+  query OffersByRecipient($recipientUserId: String!, $propertyUuid: uuid!) {
+    real_estate_offer(
+      where: {
+        recipient_user_id: { _eq: $recipientUserId }
+        property_uuid: { _eq: $propertyUuid }
+      }
+      order_by: { created_at: desc }
+    ) {
+      ${OFFER_FIELDS}
+    }
+  }
+`;
+
+const GET_BY_RECIPIENT_ALL = `
+  query OffersByRecipientAll($recipientUserId: String!) {
+    real_estate_offer(
+      where: { recipient_user_id: { _eq: $recipientUserId } }
+      order_by: { created_at: desc }
+    ) {
+      ${OFFER_FIELDS}
+    }
+  }
+`;
+
+export default async function getOffersByRecipient(
+  req: Request,
+  res: Response
+): Promise<void> {
+  try {
+    const payload = await requireAuth(req, res);
+    if (!payload) return;
+
+    const userId = getUserId(payload);
+    if (!userId) {
+      fail(res, "Invalid session", 401);
+      return;
+    }
+
+    const propertyUuid =
+      typeof req.query.propertyUuid === "string" && req.query.propertyUuid.trim()
+        ? req.query.propertyUuid.trim()
+        : undefined;
+
+    const result = propertyUuid
+      ? await hasuraQuery<{ real_estate_offer?: unknown[] }>(GET_BY_RECIPIENT, {
+          recipientUserId: userId,
+          propertyUuid,
+        })
+      : await hasuraQuery<{ real_estate_offer?: unknown[] }>(GET_BY_RECIPIENT_ALL, {
+          recipientUserId: userId,
+        });
+
+    if (result.errors?.length) {
+      fail(res, "Failed to fetch offers", 500);
+      return;
+    }
+
+    const rawItems = result.data?.real_estate_offer ?? [];
+    const items = await enrichOffersWithDetails(
+      rawItems as Parameters<typeof enrichOffersWithDetails>[0]
+    );
+
+    ok(res, { items });
+  } catch (error) {
+    console.error("[client/offers/get-offers-by-recipient]", error);
+    fail(res, "Internal server error", 500);
+  }
+}
