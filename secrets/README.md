@@ -16,6 +16,7 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 - `HASURA_GRAPHQL_ADMIN_SECRET`
 - `HASURA_GRAPHQL_JWT_SECRET`
 - `GRAFANA_ADMIN_PASSWORD` (managed Grafana; referenced from `[observability.grafana]` in `nhost/nhost.toml` for cloud deploys)
+- `MAILGUN_SMTP_PASSWORD` (Mailgun SMTP; referenced from `[provider.smtp]` in `nhost/nhost.toml` for auth emails)
 - `MEDIA_STORAGE_BUCKET` (default `dropiti-bucket` — create in Dashboard → Storage, public read for images; must **not** use a `NHOST_` prefix in `[[global.environment]]`)
 - `S3_BUCKET_*` (optional fallback when `MEDIA_STORAGE_BACKEND=s3`)
 

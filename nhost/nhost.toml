@@ -2,6 +2,42 @@
 # Secrets: repo-root `.secrets` file (local CLI) — template in `secrets/dotsecrets.example`.
 # See: secrets/README.md and documentation/AI_Rules.md
 
+# --- Auth: dropiti-v3 (client app) redirect URLs ---
+# clientUrl     — Nhost "Client URL" (prod). Used for default redirects (password reset, etc.).
+# allowedUrls   — Nhost "Allowed Redirect URLs". OAuth signInWithGoogle uses bare
+#                 window.location.origin — must match an entry exactly (no trailing slash).
+# Ref: dropiti-v3/documentation/google-auth.md Rules 2–3
+#
+# Google Cloud Console "Authorized redirect URI" (OAuth provider callback — set in GCP, not here):
+#   https://fcuycyemqprjrkbshlcj.auth.ap-southeast-1.nhost.run/v1/signin/provider/google/callback
+[auth]
+[auth.redirections]
+clientUrl = 'https://dropiti.com'
+allowedUrls = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'https://dropiti.com',
+  'https://www.dropiti.com',
+  'https://*.vercel.app',
+  'http://localhost:3000/auth/user-verification',
+  'http://localhost:3000/reset-password',
+  'https://dropiti.com/auth/user-verification',
+  'https://dropiti.com/reset-password',
+]
+
+# --- Mailgun SMTP (Nhost Auth transactional emails: verify, password reset, OTP) ---
+# Set MAILGUN_SMTP_PASSWORD in Nhost Dashboard → Secrets and repo-root `.secrets` (see secrets/dotsecrets.example).
+# Port 587 uses STARTTLS — keep secure = false (see Nhost / nodemailer docs).
+[provider.smtp]
+host = 'smtp.mailgun.org'
+port = 587
+user = 'support-dropiti@6ixtech.xyz'
+password = '{{ secrets.MAILGUN_SMTP_PASSWORD }}'
+sender = 'support-dropiti@6ixtech.xyz'
+secure = false
+method = 'LOGIN'
+
 [functions.node]
 version = 22
 
