@@ -42,3 +42,38 @@ Optional for function routes that use `getAdminSecret()` in `_lib/env.ts`:
 ## Cloud
 
 Production/staging secrets are set in the **Nhost Dashboard** (or GitHub integration), not from this file.
+
+**Config deploy will fail** with `variable not found: secrets.MAILGUN_SMTP_PASSWORD` until that secret exists in the cloud project. Add it **before** pushing `nhost.toml` that references `[provider.smtp]`.
+
+### Add `MAILGUN_SMTP_PASSWORD` (required for Mailgun SMTP)
+
+**Option A — Nhost Dashboard**
+
+1. Open your Dropiti project (`fcuycyemqprjrkbshlcj`) in [Nhost Dashboard](https://app.nhost.io).
+2. Go to **Settings → Secrets** (or **Configuration → Secrets**).
+3. Create a secret:
+   - **Name:** `MAILGUN_SMTP_PASSWORD` (must match `nhost.toml` exactly)
+   - **Value:** Mailgun SMTP password (from Mailgun → Sending → Domain → SMTP credentials)
+4. Re-run your config deploy / Git push.
+
+**Option B — Nhost CLI** (after `nhost link` to the Dropiti project)
+
+```bash
+cd dropiti-nhost
+nhost secrets create MAILGUN_SMTP_PASSWORD 'your-mailgun-smtp-password' --subdomain fcuycyemqprjrkbshlcj
+```
+
+Verify:
+
+```bash
+nhost secrets list --subdomain fcuycyemqprjrkbshlcj
+```
+
+### Troubleshooting: `variable not found: secrets.*`
+
+| Error | Fix |
+|-------|-----|
+| `secrets.MAILGUN_SMTP_PASSWORD` | Add secret in Dashboard or via `nhost secrets create` (see above) |
+| Other `secrets.*` | Same pattern — name must match `{{ secrets.NAME }}` in `nhost/nhost.toml` |
+
+Local `.secrets` only applies to **local CLI** (`nhost up`); **cloud** `replaceConfig` always reads Dashboard secrets.

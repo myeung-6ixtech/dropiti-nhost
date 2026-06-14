@@ -27,7 +27,8 @@ allowedUrls = [
 ]
 
 # --- Mailgun SMTP (Nhost Auth transactional emails: verify, password reset, OTP) ---
-# Set MAILGUN_SMTP_PASSWORD in Nhost Dashboard → Secrets and repo-root `.secrets` (see secrets/dotsecrets.example).
+# REQUIRES cloud secret MAILGUN_SMTP_PASSWORD before deploy (Dashboard → Settings → Secrets).
+# Local: repo-root `.secrets` — see secrets/README.md and secrets/dotsecrets.example.
 # Port 587 uses STARTTLS — keep secure = false (see Nhost / nodemailer docs).
 [provider.smtp]
 host = 'smtp.mailgun.org'
