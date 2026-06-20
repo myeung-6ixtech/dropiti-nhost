@@ -230,10 +230,7 @@ export async function handleAdminUpdateProperty(
   }
 
   const finalUpdates = { ...body.data.updates };
-  const shouldRecompute =
-    "address" in finalUpdates ||
-    "show_specific_location" in finalUpdates ||
-    finalUpdates.recalculatePin === true;
+  const shouldRecompute = finalUpdates.recalculatePin === true;
 
   if (shouldRecompute) {
     let existingAddress: unknown = finalUpdates.address;

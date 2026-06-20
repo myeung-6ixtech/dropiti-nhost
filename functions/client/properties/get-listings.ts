@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { optionalAuth } from "../../_lib/optional-auth";
-import { parsePagination, queryString } from "../../_lib/parse-query";
+import { parseMapBounds, parsePagination, queryString } from "../../_lib/parse-query";
 import { listPublishedProperties } from "../../_lib/properties-listings";
 import { ok, fail } from "../../_lib/respond";
 
@@ -25,6 +25,7 @@ export default async function getListings(req: Request, res: Response): Promise<
       landlordUserId: landlordUserId ?? undefined,
       location: location ?? undefined,
       keyword: keyword ?? undefined,
+      bounds: parseMapBounds(req),
     });
 
     ok(res, {

@@ -1,5 +1,12 @@
 import { hasuraQuery } from "./hasura";
 
+export type MapBoundsFilter = {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+};
+
 export interface PropertyListFilters {
   minPrice?: number;
   maxPrice?: number;
@@ -10,9 +17,11 @@ export interface PropertyListFilters {
   location?: string;
   /** Keyword search — case-insensitive substring match on `title`. */
   keyword?: string;
+  /** Map viewport — listings with lat/lng inside the bounding box. */
+  bounds?: MapBoundsFilter;
 }
 
-function buildHasuraFilters(filters: PropertyListFilters): Record<string, unknown> {
+export function buildHasuraFilters(filters: PropertyListFilters): Record<string, unknown> {
   const and: Record<string, unknown>[] = [{ status: { _eq: "published" } }];
 
   if (filters.landlordUserId) {
@@ -35,6 +44,15 @@ function buildHasuraFilters(filters: PropertyListFilters): Record<string, unknow
   }
   if (filters.keyword) {
     and.push({ title: { _ilike: `%${filters.keyword}%` } });
+  }
+  if (filters.bounds) {
+    const { north, south, east, west } = filters.bounds;
+    and.push({
+      latitude: { _is_null: false, _gte: south, _lte: north },
+    });
+    and.push({
+      longitude: { _is_null: false, _gte: west, _lte: east },
+    });
   }
 
   return and.length === 1 ? and[0]! : { _and: and };

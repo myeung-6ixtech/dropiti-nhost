@@ -29,3 +29,32 @@ export function queryInt(req: Request, key: string): number | null {
   const n = parseInt(s, 10);
   return Number.isFinite(n) ? n : null;
 }
+
+export function queryFloat(req: Request, key: string): number | null {
+  const s = queryString(req, key);
+  if (!s) return null;
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+export type MapBoundsQuery = {
+  north: number;
+  south: number;
+  east: number;
+  west: number;
+};
+
+/** Parse `north`, `south`, `east`, `west` query params for map viewport search. */
+export function parseMapBounds(req: Request): MapBoundsQuery | undefined {
+  const north = queryFloat(req, "north");
+  const south = queryFloat(req, "south");
+  const east = queryFloat(req, "east");
+  const west = queryFloat(req, "west");
+  if (north == null || south == null || east == null || west == null) {
+    return undefined;
+  }
+  if (north <= south || east <= west) {
+    return undefined;
+  }
+  return { north, south, east, west };
+}

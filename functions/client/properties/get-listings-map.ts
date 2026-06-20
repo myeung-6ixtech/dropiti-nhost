@@ -1,7 +1,11 @@
 import type { Request, Response } from "express";
 import { optionalAuth } from "../../_lib/optional-auth";
-import { parsePagination, queryString } from "../../_lib/parse-query";
+import { parseMapBounds, parsePagination, queryString } from "../../_lib/parse-query";
 import { hasuraQuery } from "../../_lib/hasura";
+import {
+  buildHasuraFilters,
+  type PropertyListFilters,
+} from "../../_lib/properties-listings";
 import { ok, fail } from "../../_lib/respond";
 
 const MAP_LISTINGS = `
@@ -32,31 +36,30 @@ const MAP_LISTINGS = `
   }
 `;
 
-function buildFilters(req: Request): Record<string, unknown> {
-  const and: Record<string, unknown>[] = [{ status: { _eq: "published" } }];
-
+function filtersFromRequest(req: Request): PropertyListFilters {
   const minPrice = queryString(req, "minPrice");
   const maxPrice = queryString(req, "maxPrice");
   const bedrooms = queryString(req, "bedrooms");
   const type = queryString(req, "type");
   const location = queryString(req, "location");
 
-  if (minPrice) and.push({ rental_price: { _gte: parseFloat(minPrice) } });
-  if (maxPrice) and.push({ rental_price: { _lte: parseFloat(maxPrice) } });
-  if (bedrooms) and.push({ num_bedroom: { _gte: parseInt(bedrooms, 10) } });
-  if (type) and.push({ property_type: { _eq: type } });
-  if (location) and.push({ address: { _ilike: `%${location}%` } });
-
-  return and.length === 1 ? and[0]! : { _and: and };
+  return {
+    minPrice: minPrice ? parseFloat(minPrice) : undefined,
+    maxPrice: maxPrice ? parseFloat(maxPrice) : undefined,
+    bedrooms: bedrooms ? parseInt(bedrooms, 10) : undefined,
+    type: type ?? undefined,
+    location: location ?? undefined,
+    bounds: parseMapBounds(req),
+  };
 }
 
-/** Lightweight map payload — id, coords, price, image only. */
+/** Lightweight map payload — id, coords, price, image only. Supports viewport bbox. */
 export default async function getListingsMap(req: Request, res: Response): Promise<void> {
   try {
     await optionalAuth(req, res);
 
     const { limit, offset } = parsePagination(req, 10, 100);
-    const filters = buildFilters(req);
+    const filters = buildHasuraFilters(filtersFromRequest(req));
 
     const result = await hasuraQuery<{
       real_estate_property_listing?: unknown[];
