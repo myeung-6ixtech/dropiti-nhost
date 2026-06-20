@@ -4,6 +4,7 @@ import { requireAuth, getUserId } from "../../_lib/auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
+import { applyListingCoordinates } from "../../_lib/geo/apply-listing-coordinates";
 
 const UpdatePropertySchema = z
   .object({
@@ -16,6 +17,7 @@ const UpdatePropertySchema = z
     display_image: z.string().optional(),
     uploaded_images: z.array(z.string()).optional(),
     external_contact: z.string().nullable().optional(),
+    show_specific_location: z.boolean().optional(),
   })
   .refine((o) => Object.keys(o).length > 1, { message: "At least one field to update" });
 
@@ -64,7 +66,22 @@ export default async function updateProperty(req: Request, res: Response): Promi
     if (!body) return;
 
     const { property_uuid, ...rest } = body;
-    const updates = { ...rest, updated_at: new Date().toISOString(), last_saved_at: new Date().toISOString() };
+    const updates: Record<string, unknown> = {
+      ...rest,
+      updated_at: new Date().toISOString(),
+      last_saved_at: new Date().toISOString(),
+    };
+
+    if (rest.address !== undefined || rest.show_specific_location !== undefined) {
+      const coords = await applyListingCoordinates({
+        address: rest.address,
+        show_specific_location: rest.show_specific_location,
+        property_uuid,
+        enableGeocode: true,
+      });
+      updates.latitude = coords.latitude;
+      updates.longitude = coords.longitude;
+    }
 
     const result = await hasuraQuery<{
       update_real_estate_property_listing?: { returning?: unknown[] };

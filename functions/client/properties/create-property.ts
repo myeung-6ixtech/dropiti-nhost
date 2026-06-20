@@ -5,6 +5,7 @@ import { requireAuth, getUserId } from "../../_lib/auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
+import { applyListingCoordinates } from "../../_lib/geo/apply-listing-coordinates";
 
 const CreatePropertySchema = z.object({
   title: z.string().min(1),
@@ -19,6 +20,7 @@ const CreatePropertySchema = z.object({
   amenities: z.array(z.string()).optional(),
   isDraft: z.boolean().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
+  show_specific_location: z.boolean().optional(),
 });
 
 const CREATE_PROPERTY = `
@@ -62,11 +64,31 @@ export default async function createProperty(req: Request, res: Response): Promi
       return;
     }
 
+    const propertyUuid = randomUUID();
+    const address = body.address ?? body.location ?? "";
+    const details = body.details as Record<string, unknown> | undefined;
+    const showSpecific =
+      typeof body.show_specific_location === "boolean"
+        ? body.show_specific_location
+        : typeof details?.showSpecificLocation === "boolean"
+          ? details.showSpecificLocation
+          : false;
+
+    const coords = await applyListingCoordinates({
+      address,
+      show_specific_location: showSpecific,
+      property_uuid: propertyUuid,
+      enableGeocode: true,
+    });
+
     const property = {
-      property_uuid: randomUUID(),
+      property_uuid: propertyUuid,
       title: body.title,
       description: body.description ?? "",
-      address: body.address ?? body.location ?? "",
+      address,
+      show_specific_location: showSpecific,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
       rental_price: price ?? 0,
       rental_price_currency: "HKD",
       num_bedroom: body.bedrooms ? parseInt(String(body.bedrooms), 10) : 0,

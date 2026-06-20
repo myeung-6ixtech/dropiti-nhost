@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { requireAdminRole } from "../../_lib/auth";
 import { hasuraQuery } from "../../_lib/hasura";
 import { ok, fail } from "../../_lib/respond";
+import { applyListingCoordinates } from "../../_lib/geo/apply-listing-coordinates";
 
 const INSERT_PROPERTY = `
   mutation InsertRealEstateProperty($object: real_estate_property_listing_insert_input!) {
@@ -74,6 +75,14 @@ export default async function adminCreateProperty(req: Request, res: Response): 
       rental_price_currency,
       availability_date: body.availableDate ?? null,
     };
+
+    const coords = await applyListingCoordinates({
+      address: object.address,
+      show_specific_location: object.show_specific_location as boolean,
+      enableGeocode: true,
+    });
+    object.latitude = coords.latitude;
+    object.longitude = coords.longitude;
 
     const result = await hasuraQuery<{
       insert_real_estate_property_listing_one?: Record<string, unknown>;

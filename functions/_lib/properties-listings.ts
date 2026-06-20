@@ -69,6 +69,9 @@ const LIST_PROPERTIES = `
       availability_date
       status
       landlord_user_id
+      latitude
+      longitude
+      show_specific_location
       created_at
     }
     real_estate_property_listing_aggregate(where: $filters) {

@@ -44,6 +44,8 @@ const LIST_PROPERTIES = `
       show_specific_location
       gross_area_size
       gross_area_size_unit
+      latitude
+      longitude
     }
     real_estate_property_listing_aggregate(where: $where) {
       aggregate {

@@ -1,0 +1,52 @@
+{
+  "countries": [
+    { "code": "HK", "name": "Hong Kong", "lat": 22.3193, "lng": 114.1694 },
+    { "code": "MO", "name": "Macau", "lat": 22.1987, "lng": 113.5439 }
+  ],
+  "regions": [
+    { "code": "hong-kong-island", "name": "Hong Kong Island", "country": "HK", "lat": 22.278, "lng": 114.175 },
+    { "code": "kowloon", "name": "Kowloon", "country": "HK", "lat": 22.32, "lng": 114.185 },
+    { "code": "new-territories", "name": "New Territories", "country": "HK", "lat": 22.4, "lng": 114.12 },
+    { "code": "macau-peninsula", "name": "Macau Peninsula", "country": "MO", "lat": 22.193, "lng": 113.541 },
+    { "code": "taipa", "name": "Taipa", "country": "MO", "lat": 22.157, "lng": 113.559 },
+    { "code": "coloane", "name": "Coloane", "country": "MO", "lat": 22.127, "lng": 113.563 },
+    { "code": "cotai", "name": "Cotai", "country": "MO", "lat": 22.142, "lng": 113.561 }
+  ],
+  "districts": [
+    { "code": "central-western", "name": "Central and Western", "region": "Hong Kong Island", "country": "HK", "lat": 22.286, "lng": 114.154 },
+    { "code": "eastern", "name": "Eastern", "region": "Hong Kong Island", "country": "HK", "lat": 22.284, "lng": 114.224 },
+    { "code": "southern", "name": "Southern", "region": "Hong Kong Island", "country": "HK", "lat": 22.247, "lng": 114.16 },
+    { "code": "wan-chai", "name": "Wan Chai", "region": "Hong Kong Island", "country": "HK", "lat": 22.28, "lng": 114.173 },
+    { "code": "sham-shui-po", "name": "Sham Shui Po", "region": "Kowloon", "country": "HK", "lat": 22.33, "lng": 114.162 },
+    { "code": "kowloon-city", "name": "Kowloon City", "region": "Kowloon", "country": "HK", "lat": 22.328, "lng": 114.191 },
+    { "code": "kwun-tong", "name": "Kwun Tong", "region": "Kowloon", "country": "HK", "lat": 22.313, "lng": 114.225 },
+    { "code": "wong-tai-sin", "name": "Wong Tai Sin", "region": "Kowloon", "country": "HK", "lat": 22.341, "lng": 114.193 },
+    { "code": "yau-tsim-mong", "name": "Yau Tsim Mong", "region": "Kowloon", "country": "HK", "lat": 22.306, "lng": 114.171 },
+    { "code": "islands", "name": "Islands", "region": "New Territories", "country": "HK", "lat": 22.261, "lng": 113.946 },
+    { "code": "kwai-tsing", "name": "Kwai Tsing", "region": "New Territories", "country": "HK", "lat": 22.354, "lng": 114.126 },
+    { "code": "north", "name": "North", "region": "New Territories", "country": "HK", "lat": 22.494, "lng": 114.138 },
+    { "code": "sai-kung", "name": "Sai Kung", "region": "New Territories", "country": "HK", "lat": 22.381, "lng": 114.273 },
+    { "code": "sha-tin", "name": "Sha Tin", "region": "New Territories", "country": "HK", "lat": 22.387, "lng": 114.195 },
+    { "code": "tai-po", "name": "Tai Po", "region": "New Territories", "country": "HK", "lat": 22.45, "lng": 114.164 },
+    { "code": "tsuen-wan", "name": "Tsuen Wan", "region": "New Territories", "country": "HK", "lat": 22.371, "lng": 114.114 },
+    { "code": "tuen-mun", "name": "Tuen Mun", "region": "New Territories", "country": "HK", "lat": 22.391, "lng": 113.977 },
+    { "code": "yuen-long", "name": "Yuen Long", "region": "New Territories", "country": "HK", "lat": 22.445, "lng": 114.022 },
+    { "code": "nossa-senhora-de-fatima", "name": "Nossa Senhora de Fátima", "region": "Macau Peninsula", "country": "MO", "lat": 22.198, "lng": 113.549 },
+    { "code": "nossa-senhora-fatima", "name": "Nossa Senhora de Fátima", "region": "Macau Peninsula", "country": "MO", "lat": 22.198, "lng": 113.549 },
+    { "code": "santo-antonio", "name": "Santo António", "region": "Macau Peninsula", "country": "MO", "lat": 22.193, "lng": 113.539 },
+    { "code": "se", "name": "Sé", "region": "Macau Peninsula", "country": "MO", "lat": 22.192, "lng": 113.541 },
+    { "code": "sao-lazaro", "name": "São Lázaro", "region": "Macau Peninsula", "country": "MO", "lat": 22.194, "lng": 113.548 },
+    { "code": "sao-lourenco", "name": "São Lourenço", "region": "Macau Peninsula", "country": "MO", "lat": 22.189, "lng": 113.536 },
+    { "code": "taipa", "name": "Taipa", "region": "Taipa", "country": "MO", "lat": 22.157, "lng": 113.559 },
+    { "code": "coloane", "name": "Coloane", "region": "Coloane", "country": "MO", "lat": 22.127, "lng": 113.563 },
+    { "code": "cotai", "name": "Cotai", "region": "Cotai", "country": "MO", "lat": 22.142, "lng": 113.561 }
+  ],
+  "districtAliases": {
+    "tst": "yau-tsim-mong",
+    "tsim sha tsui": "yau-tsim-mong",
+    "central": "central-western",
+    "central hong kong": "central-western",
+    "macau": "MO",
+    "hong kong": "HK"
+  }
+}

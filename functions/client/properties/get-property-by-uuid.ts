@@ -44,6 +44,8 @@ type ListingRow = {
   rental_price_currency: string;
   availability_date: string;
   status: string;
+  latitude?: number | null;
+  longitude?: number | null;
 };
 
 const LISTING_FIELDS = `
@@ -70,6 +72,8 @@ const LISTING_FIELDS = `
   rental_price_currency
   availability_date
   status
+  latitude
+  longitude
 `;
 
 const GET_PROPERTY_BY_UUID = `
@@ -161,6 +165,8 @@ function buildPropertyResponse(property: ListingRow) {
       location: formatPropertyLocation(property.address),
       address: property.address,
       show_specific_location: property.show_specific_location || false,
+      latitude: property.latitude ?? null,
+      longitude: property.longitude ?? null,
       price: property.rental_price || 0,
       bedrooms: property.num_bedroom || 0,
       bathrooms: property.num_bathroom || 0,

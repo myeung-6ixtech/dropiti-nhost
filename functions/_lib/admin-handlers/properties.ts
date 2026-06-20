@@ -6,6 +6,7 @@ import { hasuraQuery } from "../hasura";
 import { UUID_RE } from "../admin-offers-incoming";
 import { validateBody } from "../validate";
 import { ok, fail } from "../respond";
+import { applyListingCoordinates } from "../geo/apply-listing-coordinates";
 
 const GET_PROPERTY = `
   query AdminGetProperty($propertyUuid: uuid!) {
@@ -38,6 +39,8 @@ const GET_PROPERTY = `
       external_url
       completion_percentage
       availability_date
+      latitude
+      longitude
       created_at
       updated_at
     }
@@ -226,11 +229,50 @@ export async function handleAdminUpdateProperty(
     return;
   }
 
+  const finalUpdates = { ...body.data.updates };
+  const shouldRecompute =
+    "address" in finalUpdates ||
+    "show_specific_location" in finalUpdates ||
+    finalUpdates.recalculatePin === true;
+
+  if (shouldRecompute) {
+    let existingAddress: unknown = finalUpdates.address;
+    let existingShow = finalUpdates.show_specific_location as boolean | undefined;
+
+    if (existingAddress === undefined || existingShow === undefined) {
+      const existing = await hasuraQuery<{
+        real_estate_property_listing?: Array<{
+          address: unknown;
+          show_specific_location?: boolean;
+        }>;
+      }>(GET_PROPERTY, { propertyUuid });
+      const row = existing.data?.real_estate_property_listing?.[0] as
+        | Record<string, unknown>
+        | undefined;
+      if (row) {
+        if (existingAddress === undefined) existingAddress = row.address;
+        if (existingShow === undefined) existingShow = Boolean(row.show_specific_location);
+      }
+    }
+
+    const coords = await applyListingCoordinates({
+      address: existingAddress,
+      show_specific_location: existingShow,
+      property_uuid: propertyUuid,
+      enableGeocode: true,
+      recalculate: true,
+    });
+    finalUpdates.latitude = coords.latitude;
+    finalUpdates.longitude = coords.longitude;
+  }
+
+  delete finalUpdates.recalculatePin;
+
   const result = await hasuraQuery<{
     update_real_estate_property_listing?: { returning?: unknown[] };
   }>(UPDATE, {
     propertyUuid,
-    updates: body.data.updates,
+    updates: finalUpdates,
   });
   if (result.errors?.length) {
     fail(res, "Update failed", 500);

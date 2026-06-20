@@ -1184,6 +1184,26 @@ interface AdminPropertyListItem {
 }
 ```
 
+#### Map coordinates (lat/lng)
+
+Listings store `latitude` / `longitude` on `real_estate_property_listing`. There are **no** separate metadata columns for pin precision or source — precision is inferred at read time from `show_specific_location` and whether a street-level address exists.
+
+**Write path:** `functions/_lib/geo/resolve-listing-coordinates.ts` resolves coordinates on create/update/publish (client + admin) using this waterfall:
+
+1. Google Geocoding (server-only, `GOOGLE_MAPS_GEOCODING_API_KEY`) when `show_specific_location === true` and a street is present
+2. District centroid (HK/MO districts in `_lib/geo/centroids.json`)
+3. Region centroid
+4. Country centroid (HK / MO)
+5. `null` if nothing matchable
+
+Approximate pins (district/region/country) receive deterministic jitter (±~100m) from `property_uuid` so stacked pins remain clickable.
+
+**Privacy:** never geocode to street level when `show_specific_location === false`.
+
+**Admin backfill:** `POST /v1/admin/properties/backfill-coordinates?mode=centroid|geocode` — batch-fills null coordinates. **Quality:** `GET /v1/admin/properties/coordinate-quality`.
+
+**Search map:** `GET /v1/client/properties/get-listings` and optional lightweight `GET /v1/client/properties/get-listings-map` return lat/lng; clients must not geocode client-side.
+
 #### Pagination and filters
 
 ```
