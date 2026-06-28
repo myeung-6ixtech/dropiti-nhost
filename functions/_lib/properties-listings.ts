@@ -13,7 +13,7 @@ export interface PropertyListFilters {
   bedrooms?: number;
   type?: string;
   landlordUserId?: string;
-  /** District / area search — case-insensitive substring match on `address`. */
+  /** District / area search — case-insensitive match on `address` or `title`. */
   location?: string;
   /** Keyword search — case-insensitive substring match on `title`. */
   keyword?: string;
@@ -40,7 +40,10 @@ export function buildHasuraFilters(filters: PropertyListFilters): Record<string,
     and.push({ property_type: { _eq: filters.type } });
   }
   if (filters.location) {
-    and.push({ address: { _ilike: `%${filters.location}%` } });
+    const term = `%${filters.location}%`;
+    and.push({
+      _or: [{ address: { _ilike: term } }, { title: { _ilike: term } }],
+    });
   }
   if (filters.keyword) {
     and.push({ title: { _ilike: `%${filters.keyword}%` } });
