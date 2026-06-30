@@ -44,6 +44,13 @@ type RealEstateUserRow = {
   photo_url?: string | null;
 };
 
+type AuthUserRow = {
+  id: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+  displayName?: string | null;
+};
+
 type PropertyRow = {
   property_uuid: string;
   title?: string | null;
@@ -56,15 +63,33 @@ type PropertyRow = {
   display_image?: string | null;
 };
 
-const GET_USERS_BY_NHOST_IDS = `
-  query OfferUsersByNhostIds($ids: [uuid!]!) {
-    real_estate_user(where: { nhost_user_id: { _in: $ids } }) {
+const GET_USERS_BY_IDS = `
+  query OfferUsersByIds($ids: [uuid!]!) {
+    real_estate_user(
+      where: {
+        _or: [
+          { nhost_user_id: { _in: $ids } }
+          { uuid: { _in: $ids } }
+        ]
+      }
+    ) {
       uuid
       nhost_user_id
       display_name
       email
       phone_number
       photo_url
+    }
+  }
+`;
+
+const GET_AUTH_USERS_BY_IDS = `
+  query OfferAuthUsersByIds($ids: [uuid!]!) {
+    users(where: { id: { _in: $ids } }) {
+      id
+      email
+      avatarUrl
+      displayName
     }
   }
 `;
@@ -85,14 +110,35 @@ const GET_PROPERTIES_BY_UUIDS = `
   }
 `;
 
-function mapOfferUser(user: RealEstateUserRow | undefined) {
-  if (!user) return undefined;
+function indexRealEstateUsers(users: RealEstateUserRow[]): Map<string, RealEstateUserRow> {
+  const map = new Map<string, RealEstateUserRow>();
+  for (const user of users) {
+    if (user.nhost_user_id) map.set(user.nhost_user_id, user);
+    if (user.uuid) map.set(user.uuid, user);
+  }
+  return map;
+}
+
+function mergeOfferUser(
+  userId: string,
+  reUser: RealEstateUserRow | undefined,
+  authUser: AuthUserRow | undefined
+) {
+  if (!reUser && !authUser) return undefined;
+
+  const email = reUser?.email?.trim() || authUser?.email?.trim() || "";
+  const displayName =
+    reUser?.display_name?.trim() ||
+    authUser?.displayName?.trim() ||
+    email.split("@")[0] ||
+    "User";
+
   return {
-    uuid: user.uuid,
-    displayName: user.display_name?.trim() || user.email?.split("@")[0] || "User",
-    email: user.email ?? "",
-    phoneNumber: user.phone_number ?? undefined,
-    photoUrl: user.photo_url ?? undefined,
+    uuid: reUser?.uuid ?? userId,
+    displayName,
+    email,
+    phoneNumber: reUser?.phone_number ?? undefined,
+    photoUrl: reUser?.photo_url?.trim() || authUser?.avatarUrl?.trim() || undefined,
   };
 }
 
@@ -113,12 +159,20 @@ function mapOfferProperty(property: PropertyRow | undefined) {
 
 function transformOfferRow(
   offer: RawOfferRow,
-  usersByNhostId: Map<string, RealEstateUserRow>,
+  usersByKey: Map<string, RealEstateUserRow>,
+  authById: Map<string, AuthUserRow>,
   propertiesByUuid: Map<string, PropertyRow>
 ): Record<string, unknown> {
   const initiatorUserId = String(offer.initiator_user_id ?? "");
   const recipientUserId = String(offer.recipient_user_id ?? "");
   const propertyUuid = String(offer.property_uuid ?? "");
+
+  const resolveUser = (userId: string) =>
+    mergeOfferUser(
+      userId,
+      usersByKey.get(userId),
+      authById.get(userId)
+    );
 
   const paymentFrequency =
     toClientPaymentFrequency(offer.payment_frequency ?? undefined) ??
@@ -169,8 +223,8 @@ function transformOfferRow(
     finalMoveInDate: offer.final_move_in_date ?? undefined,
     finalAcceptedAt: offer.final_accepted_at ?? undefined,
     finalAcceptedBy: offer.final_accepted_by ?? undefined,
-    initiator: mapOfferUser(usersByNhostId.get(initiatorUserId)),
-    recipient: mapOfferUser(usersByNhostId.get(recipientUserId)),
+    initiator: resolveUser(initiatorUserId),
+    recipient: resolveUser(recipientUserId),
     property: mapOfferProperty(propertiesByUuid.get(propertyUuid)),
   };
 }
@@ -190,22 +244,32 @@ export async function enrichOffersWithDetails(
     if (offer.property_uuid) propertyUuids.add(String(offer.property_uuid));
   }
 
-  const usersByNhostId = new Map<string, RealEstateUserRow>();
+  const usersByKey = new Map<string, RealEstateUserRow>();
+  const authById = new Map<string, AuthUserRow>();
   const propertiesByUuid = new Map<string, PropertyRow>();
 
   const fetches: Promise<void>[] = [];
 
   if (userIds.size > 0) {
+    const ids = [...userIds];
     fetches.push(
       (async () => {
         const result = await hasuraQuery<{ real_estate_user?: RealEstateUserRow[] }>(
-          GET_USERS_BY_NHOST_IDS,
-          { ids: [...userIds] }
+          GET_USERS_BY_IDS,
+          { ids }
         );
-        for (const user of result.data?.real_estate_user ?? []) {
-          if (user.nhost_user_id) {
-            usersByNhostId.set(user.nhost_user_id, user);
-          }
+        for (const [key, user] of indexRealEstateUsers(result.data?.real_estate_user ?? [])) {
+          usersByKey.set(key, user);
+        }
+      })()
+    );
+    fetches.push(
+      (async () => {
+        const result = await hasuraQuery<{ users?: AuthUserRow[] }>(GET_AUTH_USERS_BY_IDS, {
+          ids,
+        });
+        for (const user of result.data?.users ?? []) {
+          if (user.id) authById.set(user.id, user);
         }
       })()
     );
@@ -228,5 +292,7 @@ export async function enrichOffersWithDetails(
 
   await Promise.all(fetches);
 
-  return offers.map((offer) => transformOfferRow(offer, usersByNhostId, propertiesByUuid));
+  return offers.map((offer) =>
+    transformOfferRow(offer, usersByKey, authById, propertiesByUuid)
+  );
 }

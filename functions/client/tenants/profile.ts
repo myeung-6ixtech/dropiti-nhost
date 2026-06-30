@@ -84,36 +84,41 @@ const UPDATE_PROFILE = `
   }
 `;
 
+const optionalString = z.string().nullish();
+const optionalNumber = z.coerce.number().nullish();
+const optionalBoolean = z.boolean().nullish();
+const stringArray = z.array(z.string()).nullish();
+
 const TenantProfileFieldsSchema = z.object({
-  tenant_listing_title: z.string().optional(),
-  tenant_listing_description: z.string().optional(),
-  budget_min: z.number().optional(),
-  budget_max: z.number().optional(),
-  budget_currency: z.string().optional(),
-  payment_preferences: z.array(z.string()).optional(),
-  deposit_capability: z.boolean().optional(),
-  preferred_property_types: z.array(z.string()).optional(),
-  rental_space_preference: z.string().optional(),
-  furnishing_preference: z.string().optional(),
-  pets_allowed: z.boolean().optional(),
-  preferred_locations: z.array(z.string()).optional(),
-  transportation_proximity: z.array(z.string()).optional(),
-  neighborhood_preferences: z.array(z.string()).optional(),
-  location_flexibility: z.string().optional(),
-  preferred_move_in_date: z.string().nullable().optional(),
-  preferred_lease_duration: z.number().optional(),
-  notice_period: z.string().optional(),
-  urgency_level: z.string().optional(),
-  work_location: z.string().optional(),
-  lifestyle_preferences: z.array(z.string()).optional(),
-  special_requirements: z.array(z.string()).optional(),
-  contact_preferences: z.array(z.string()).optional(),
-  best_contact_times: z.array(z.string()).optional(),
-  response_time_expectation: z.string().optional(),
-  privacy_settings: z.record(z.unknown()).optional(),
+  tenant_listing_title: optionalString,
+  tenant_listing_description: optionalString,
+  budget_min: optionalNumber,
+  budget_max: optionalNumber,
+  budget_currency: optionalString,
+  payment_preferences: stringArray,
+  deposit_capability: optionalBoolean,
+  preferred_property_types: stringArray,
+  rental_space_preference: optionalString,
+  furnishing_preference: optionalString,
+  pets_allowed: optionalBoolean,
+  preferred_locations: stringArray,
+  transportation_proximity: stringArray,
+  neighborhood_preferences: stringArray,
+  location_flexibility: optionalString,
+  preferred_move_in_date: optionalString,
+  preferred_lease_duration: optionalNumber,
+  notice_period: optionalString,
+  urgency_level: optionalString,
+  work_location: optionalString,
+  lifestyle_preferences: stringArray,
+  special_requirements: stringArray,
+  contact_preferences: stringArray,
+  best_contact_times: stringArray,
+  response_time_expectation: optionalString,
+  privacy_settings: z.record(z.string(), z.unknown()).nullish(),
   tenant_listing_status: z
     .enum(["draft", "active", "inactive", "paused"])
-    .optional(),
+    .nullish(),
 });
 
 const PatchProfileSchema = TenantProfileFieldsSchema.refine(
@@ -130,11 +135,24 @@ type TenantProfileRow = Record<string, unknown> & {
   user_id?: string;
 };
 
+/** Omit null/undefined so Hasura does not overwrite columns with NULL on partial upserts. */
+function toHasuraProfileUpdates(
+  fields: Record<string, unknown>
+): Record<string, unknown> {
+  const updates: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== null && value !== undefined) {
+      updates[key] = value;
+    }
+  }
+  return updates;
+}
+
 function stripUpsertMeta(
   body: z.infer<typeof UpsertProfileSchema>
 ): Record<string, unknown> {
   const { user_nhost_user_id: _uid, ...rest } = body;
-  return rest;
+  return toHasuraProfileUpdates(rest);
 }
 
 async function fetchProfileByUserId(
@@ -285,7 +303,10 @@ export default async function tenantProfile(
         update_real_estate_tenant_profile?: { returning?: TenantProfileRow[] };
       }>(UPDATE_PROFILE, {
         user_id: jwtUserId,
-        updates: { ...body, updated_at: new Date().toISOString() },
+        updates: {
+          ...toHasuraProfileUpdates(body),
+          updated_at: new Date().toISOString(),
+        },
       });
 
       const row = result.data?.update_real_estate_tenant_profile?.returning?.[0];

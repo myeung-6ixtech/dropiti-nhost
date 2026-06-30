@@ -53,6 +53,43 @@ const GET_BY_NHOST_USER_ID = `
   }
 `;
 
+const GET_BY_NHOST_UUID = `
+  query GetUserByNhostUuid($uuid: uuid!) {
+    real_estate_user(where: { uuid: { _eq: $uuid } }, limit: 1) {
+      ${FULL_USER_FIELDS}
+    }
+  }
+`;
+
+const GET_AUTH_USER_BY_ID = `
+  query GetAuthUserById($id: uuid!) {
+    users(where: { id: { _eq: $id } }, limit: 1) {
+      id
+      email
+      avatarUrl
+      displayName
+    }
+  }
+`;
+
+type AuthUserRow = {
+  id: string;
+  email?: string | null;
+  avatarUrl?: string | null;
+  displayName?: string | null;
+};
+
+function authUserToProfile(auth: AuthUserRow): Record<string, unknown> {
+  const email = auth.email?.trim() || "";
+  return {
+    uuid: auth.id,
+    nhost_user_id: auth.id,
+    display_name: auth.displayName?.trim() || email.split("@")[0] || "User",
+    email,
+    photo_url: auth.avatarUrl ?? null,
+  };
+}
+
 export default async function getUserById(req: Request, res: Response): Promise<void> {
   try {
     const nhostUserId = queryString(req, "nhost_user_id");
@@ -82,6 +119,26 @@ export default async function getUserById(req: Request, res: Response): Promise<
         return;
       }
       user = result.data?.real_estate_user?.[0];
+
+      if (!user) {
+        const byUuid = await hasuraQuery<{ real_estate_user?: unknown[] }>(
+          GET_BY_NHOST_UUID,
+          { uuid: nhostUserId }
+        );
+        if (!byUuid.errors?.length) {
+          user = byUuid.data?.real_estate_user?.[0];
+        }
+      }
+
+      if (!user) {
+        const authResult = await hasuraQuery<{ users?: AuthUserRow[] }>(
+          GET_AUTH_USER_BY_ID,
+          { id: nhostUserId }
+        );
+        if (!authResult.errors?.length && authResult.data?.users?.[0]) {
+          user = authUserToProfile(authResult.data.users[0]);
+        }
+      }
     } else {
       const payload = await requireAuth(req, res);
       if (!payload) return;

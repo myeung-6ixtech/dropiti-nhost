@@ -17,9 +17,18 @@ export type OfferRow = {
   last_action_by?: string | null;
   last_action_type?: string | null;
   current_rent_price?: number | null;
+  current_rent_price_currency?: string | null;
   current_num_leasing_months?: number | null;
   current_payment_frequency?: string | null;
   current_move_in_date?: string | null;
+  last_action_at?: string | null;
+  final_rent_price?: number | null;
+  final_rent_price_currency?: string | null;
+  final_num_leasing_months?: number | null;
+  final_payment_frequency?: string | null;
+  final_move_in_date?: string | null;
+  final_accepted_at?: string | null;
+  final_accepted_by?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -40,10 +49,19 @@ export const OFFER_FIELDS = `
   negotiation_round
   last_action_by
   last_action_type
+  last_action_at
   current_rent_price
+  current_rent_price_currency
   current_num_leasing_months
   current_payment_frequency
   current_move_in_date
+  final_rent_price
+  final_rent_price_currency
+  final_num_leasing_months
+  final_payment_frequency
+  final_move_in_date
+  final_accepted_at
+  final_accepted_by
   created_at
   updated_at
 `;
