@@ -10,7 +10,23 @@
 #
 # Google Cloud Console "Authorized redirect URI" (OAuth provider callback — set in GCP, not here):
 #   https://fcuycyemqprjrkbshlcj.auth.ap-southeast-1.nhost.run/v1/signin/provider/google/callback
+#
+# Google Cloud Console "Authorized JavaScript origins" (Nhost auth server):
+#   https://fcuycyemqprjrkbshlcj.auth.ap-southeast-1.nhost.run
+#
+# Cloud secrets required before deploy: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+# (Dashboard → Settings → Secrets, or `nhost secrets create` — see secrets/README.md)
 [auth]
+
+# Allow Google OAuth when a pre-existing email/password account is unverified (handled in app code).
+[auth.method.emailPassword]
+emailVerificationRequired = false
+
+[auth.method.oauth.google]
+enabled = true
+clientId = '{{ secrets.GOOGLE_CLIENT_ID }}'
+clientSecret = '{{ secrets.GOOGLE_CLIENT_SECRET }}'
+
 [auth.redirections]
 clientUrl = 'https://dropiti.com'
 allowedUrls = [
