@@ -4,19 +4,27 @@ const ALGORITHM = "aes-256-cbc";
 const KEY_LENGTH = 32;
 const IV_LENGTH = 16;
 
-function getEncryptionKey(): Buffer {
-  const key = process.env.CHAT_ENCRYPTION_KEY;
-  if (!key) {
-    throw new Error("CHAT_ENCRYPTION_KEY environment variable is required");
-  }
+function getEncryptionKey(): Buffer | null {
+  const key = process.env.CHAT_ENCRYPTION_KEY?.trim();
+  if (!key) return null;
   if (key.length === 64) {
     return Buffer.from(key, "hex");
   }
   return crypto.pbkdf2Sync(key, "dropiti-chat-salt", 100000, KEY_LENGTH, "sha256");
 }
 
+export function isChatEncryptionConfigured(): boolean {
+  return Boolean(process.env.CHAT_ENCRYPTION_KEY?.trim());
+}
+
 export function encryptMessage(plaintext: string): string {
   const key = getEncryptionKey();
+  if (!key) {
+    console.warn(
+      "[chat-encryption] CHAT_ENCRYPTION_KEY not set; storing message as plaintext"
+    );
+    return plaintext;
+  }
   const iv = crypto.randomBytes(IV_LENGTH);
   const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
   let encrypted = cipher.update(plaintext, "utf8", "base64");
@@ -27,6 +35,9 @@ export function encryptMessage(plaintext: string): string {
 
 export function decryptMessage(encryptedData: string): string {
   const key = getEncryptionKey();
+  if (!key) {
+    return encryptedData;
+  }
   const combined = Buffer.from(encryptedData, "base64");
   const iv = combined.subarray(0, IV_LENGTH);
   const encrypted = combined.subarray(IV_LENGTH);

@@ -90,6 +90,11 @@ value = '{{ secrets.S3_BUCKET_NAME }}'
 name = 'S3_BUCKET_AWS_REGION'
 value = 'ap-northeast-2'
 
+# AES-256 chat message encryption (64-char hex). Required for production; see secrets/README.md.
+[[global.environment]]
+name = 'CHAT_ENCRYPTION_KEY'
+value = '{{ secrets.CHAT_ENCRYPTION_KEY }}'
+
 [hasura]
 adminSecret = '{{ secrets.HASURA_GRAPHQL_ADMIN_SECRET }}'
 

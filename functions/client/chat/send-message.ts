@@ -82,12 +82,13 @@ export default async function sendMessage(req: Request, res: Response): Promise<
       senderUserId: userId,
       content: encryptedContent,
       messageType: body.messageType ?? "text",
-      metadata: body.metadata ?? null,
+      metadata: body.metadata ?? {},
     });
 
     if (result.errors?.length || !result.data?.insert_real_estate_chat_message_one) {
+      const hasuraMessage = result.errors?.[0]?.message ?? "unknown";
       console.error("[client/chat/send-message]", result.errors);
-      fail(res, "Failed to send message", 500);
+      fail(res, "Failed to send message", 500, hasuraMessage);
       return;
     }
 

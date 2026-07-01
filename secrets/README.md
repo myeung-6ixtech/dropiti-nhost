@@ -18,6 +18,7 @@ The keys in `dotsecrets.example` match `nhost/nhost.toml` interpolations:
 - `GRAFANA_ADMIN_PASSWORD` (managed Grafana; referenced from `[observability.grafana]` in `nhost/nhost.toml` for cloud deploys)
 - `MAILGUN_SMTP_PASSWORD` (Mailgun SMTP; referenced from `[provider.smtp]` in `nhost/nhost.toml` for auth emails)
 - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (Google OAuth; referenced from `[auth.method.oauth.google]` in `nhost/nhost.toml`)
+- `CHAT_ENCRYPTION_KEY` (64-char hex AES key for chat; referenced from `[[global.environment]]` in `nhost/nhost.toml`)
 - `MEDIA_STORAGE_BUCKET` (default `dropiti-bucket` — create in Dashboard → Storage, public read for images; must **not** use a `NHOST_` prefix in `[[global.environment]]`)
 - `S3_BUCKET_*` (optional fallback when `MEDIA_STORAGE_BACKEND=s3`)
 
@@ -76,6 +77,7 @@ nhost secrets list --subdomain fcuycyemqprjrkbshlcj
 |-------|-----|
 | `secrets.MAILGUN_SMTP_PASSWORD` | Add secret in Dashboard or via `nhost secrets create` (see above) |
 | `secrets.GOOGLE_CLIENT_ID` / `secrets.GOOGLE_CLIENT_SECRET` | Google Cloud OAuth Web client — callback URI must be `https://<subdomain>.auth.<region>.nhost.run/v1/signin/provider/google/callback` |
+| `secrets.CHAT_ENCRYPTION_KEY` | 64-char hex from `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` — must match any key used by legacy Next.js chat routes if migrating |
 | Other `secrets.*` | Same pattern — name must match `{{ secrets.NAME }}` in `nhost/nhost.toml` |
 
 Local `.secrets` only applies to **local CLI** (`nhost up`); **cloud** `replaceConfig` always reads Dashboard secrets.
