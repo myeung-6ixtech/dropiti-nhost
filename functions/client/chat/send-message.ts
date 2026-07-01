@@ -10,7 +10,7 @@ const SendMessageSchema = z.object({
   roomId: z.string().uuid(),
   content: z.string().min(1).max(2000),
   messageType: z.string().optional(),
-  metadata: z.record(z.unknown()).nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).nullable().optional(),
 });
 
 const SEND_MESSAGE = `

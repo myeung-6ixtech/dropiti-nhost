@@ -21,9 +21,9 @@ const UpdateUserSchema = z
     marital_status: z.string().optional(),
     languages: z.union([z.array(z.string()), z.string()]).optional(),
     onboarding_complete: z.boolean().optional(),
-    preferences: z.record(z.unknown()).optional(),
-    notification_settings: z.record(z.unknown()).optional(),
-    privacy_settings: z.record(z.unknown()).optional(),
+    preferences: z.record(z.string(), z.unknown()).optional(),
+    notification_settings: z.record(z.string(), z.unknown()).optional(),
+    privacy_settings: z.record(z.string(), z.unknown()).optional(),
   })
   .refine((o) => Object.keys(o).length > 0, { message: "At least one field required" });
 
