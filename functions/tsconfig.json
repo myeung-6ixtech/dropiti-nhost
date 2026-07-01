@@ -1,19 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "Node16",
+    "moduleResolution": "Node16",
     "strict": true,
-    "ignoreDeprecations": "6.0",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "outDir": "dist",
-    "rootDir": ".",
-    "baseUrl": ".",
-    "paths": {
-      "@lib/*": ["_lib/*"]
-    }
+    "rootDir": "."
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules", "dist"]
