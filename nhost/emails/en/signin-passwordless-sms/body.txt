@@ -1,4 +1,4 @@
-TastyPlates: sign in with this link ${link}
+Dropiti: sign in with this link ${link}
 
 Your code: ${ticket}
 
