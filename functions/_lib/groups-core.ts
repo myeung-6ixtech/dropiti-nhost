@@ -1,0 +1,510 @@
+import { hasuraQuery } from "./hasura";
+
+export type GroupStatus = "pending" | "active" | "locked" | "disbanded";
+export type MemberRole = "organiser" | "member";
+export type MemberStatus = "invited" | "accepted" | "declined" | "removed";
+
+export type TenancyGroupRow = {
+  id: string;
+  name: string;
+  description?: string | null;
+  organiser_id: string;
+  status: GroupStatus;
+  max_members: number;
+  budget_min?: number | null;
+  budget_max?: number | null;
+  created_at: string;
+  updated_at: string;
+  disbanded_at?: string | null;
+};
+
+export type TenancyGroupMemberRow = {
+  id: string;
+  group_id: string;
+  user_id: string;
+  role: MemberRole;
+  status: MemberStatus;
+  invited_at: string;
+  responded_at?: string | null;
+};
+
+export type GroupMemberWithUser = TenancyGroupMemberRow & {
+  user?: {
+    userId: string;
+    displayName: string;
+    email?: string | null;
+    avatarUrl?: string | null;
+  };
+};
+
+export type GroupWithMembers = TenancyGroupRow & {
+  members: GroupMemberWithUser[];
+};
+
+const GROUP_FIELDS = `
+  id
+  name
+  description
+  organiser_id
+  status
+  max_members
+  budget_min
+  budget_max
+  created_at
+  updated_at
+  disbanded_at
+`;
+
+const MEMBER_FIELDS = `
+  id
+  group_id
+  user_id
+  role
+  status
+  invited_at
+  responded_at
+`;
+
+const GET_GROUP = `
+  query GetTenancyGroup($id: uuid!) {
+    real_estate_tenancy_groups_by_pk(id: $id) {
+      ${GROUP_FIELDS}
+      members: tenancy_group_members {
+        ${MEMBER_FIELDS}
+      }
+    }
+  }
+`;
+
+const GET_GROUPS_FOR_USER = `
+  query GetGroupsForUser($userId: String!) {
+    real_estate_tenancy_groups(
+      where: {
+        _or: [
+          { organiser_id: { _eq: $userId } }
+          { tenancy_group_members: { user_id: { _eq: $userId } } }
+        ]
+        status: { _neq: "disbanded" }
+      }
+      order_by: { updated_at: desc }
+    ) {
+      ${GROUP_FIELDS}
+      members: tenancy_group_members(order_by: { invited_at: asc }) {
+        ${MEMBER_FIELDS}
+      }
+    }
+  }
+`;
+
+const CHECK_ACTIVE_MEMBERSHIP = `
+  query CheckActiveGroupMembership($userId: String!) {
+    real_estate_tenancy_group_members(
+      where: {
+        user_id: { _eq: $userId }
+        status: { _eq: "accepted" }
+        group: { status: { _in: ["pending", "active", "locked"] } }
+      }
+      limit: 1
+    ) {
+      id
+      group_id
+      group {
+        id
+        name
+        status
+      }
+    }
+  }
+`;
+
+const LOOKUP_USER_BY_EMAIL = `
+  query LookupUserByEmail($email: String!) {
+    real_estate_user(where: { email: { _eq: $email } }, limit: 1) {
+      nhost_user_id
+      display_name
+      email
+      photo_url
+    }
+  }
+`;
+
+const LOOKUP_USER_BY_NHOST_ID = `
+  query LookupUserByNhostId($nhostUserId: uuid!) {
+    real_estate_user(where: { nhost_user_id: { _eq: $nhostUserId } }, limit: 1) {
+      nhost_user_id
+      display_name
+      email
+      photo_url
+    }
+  }
+`;
+
+const LOOKUP_USERS_BY_IDS = `
+  query LookupUsersByIds($ids: [uuid!]!) {
+    real_estate_user(where: { nhost_user_id: { _in: $ids } }) {
+      nhost_user_id
+      display_name
+      email
+      photo_url
+    }
+  }
+`;
+
+const CREATE_GROUP = `
+  mutation CreateTenancyGroup($object: real_estate_tenancy_groups_insert_input!) {
+    insert_real_estate_tenancy_groups_one(object: $object) {
+      ${GROUP_FIELDS}
+      members: tenancy_group_members {
+        ${MEMBER_FIELDS}
+      }
+    }
+  }
+`;
+
+const INSERT_MEMBER = `
+  mutation InsertGroupMember($object: real_estate_tenancy_group_members_insert_input!) {
+    insert_real_estate_tenancy_group_members_one(object: $object) {
+      ${MEMBER_FIELDS}
+    }
+  }
+`;
+
+const UPDATE_MEMBER = `
+  mutation UpdateGroupMember($id: uuid!, $updates: real_estate_tenancy_group_members_set_input!) {
+    update_real_estate_tenancy_group_members_by_pk(pk_columns: { id: $id }, _set: $updates) {
+      ${MEMBER_FIELDS}
+    }
+  }
+`;
+
+const UPDATE_GROUP = `
+  mutation UpdateTenancyGroup($id: uuid!, $updates: real_estate_tenancy_groups_set_input!) {
+    update_real_estate_tenancy_groups_by_pk(pk_columns: { id: $id }, _set: $updates) {
+      ${GROUP_FIELDS}
+    }
+  }
+`;
+
+const MIN_ACTIVE_MEMBERS = 2;
+
+export async function getGroupById(groupId: string): Promise<GroupWithMembers | null> {
+  const result = await hasuraQuery<{
+    real_estate_tenancy_groups_by_pk?: TenancyGroupRow & {
+      members?: TenancyGroupMemberRow[];
+    };
+  }>(GET_GROUP, { id: groupId });
+
+  if (result.errors?.length) {
+    throw new Error(result.errors[0]?.message ?? "Failed to fetch group");
+  }
+
+  const row = result.data?.real_estate_tenancy_groups_by_pk;
+  if (!row) return null;
+
+  return {
+    ...row,
+    members: row.members ?? [],
+  };
+}
+
+export async function getGroupsForUser(userId: string): Promise<GroupWithMembers[]> {
+  const result = await hasuraQuery<{
+    real_estate_tenancy_groups?: Array<TenancyGroupRow & { members?: TenancyGroupMemberRow[] }>;
+  }>(GET_GROUPS_FOR_USER, { userId });
+
+  if (result.errors?.length) {
+    throw new Error(result.errors[0]?.message ?? "Failed to fetch groups");
+  }
+
+  return (result.data?.real_estate_tenancy_groups ?? []).map((g) => ({
+    ...g,
+    members: g.members ?? [],
+  }));
+}
+
+export async function getActiveMembership(userId: string) {
+  const result = await hasuraQuery<{
+    real_estate_tenancy_group_members?: Array<{
+      id: string;
+      group_id: string;
+      group?: { id: string; name: string; status: GroupStatus };
+    }>;
+  }>(CHECK_ACTIVE_MEMBERSHIP, { userId });
+
+  if (result.errors?.length) {
+    throw new Error(result.errors[0]?.message ?? "Failed to check membership");
+  }
+
+  return result.data?.real_estate_tenancy_group_members?.[0] ?? null;
+}
+
+export async function resolveInviteeUserId(
+  inviteeEmail?: string,
+  inviteeUserId?: string
+): Promise<{ userId: string; displayName: string } | null> {
+  if (inviteeUserId) {
+    const result = await hasuraQuery<{
+      real_estate_user?: Array<{
+        nhost_user_id: string;
+        display_name?: string | null;
+        email?: string | null;
+      }>;
+    }>(LOOKUP_USER_BY_NHOST_ID, { nhostUserId: inviteeUserId });
+
+    const row = result.data?.real_estate_user?.[0];
+    if (!row?.nhost_user_id) return null;
+    return {
+      userId: row.nhost_user_id,
+      displayName: row.display_name?.trim() || row.email?.trim() || "User",
+    };
+  }
+
+  if (inviteeEmail) {
+    const result = await hasuraQuery<{
+      real_estate_user?: Array<{
+        nhost_user_id: string;
+        display_name?: string | null;
+        email?: string | null;
+      }>;
+    }>(LOOKUP_USER_BY_EMAIL, { email: inviteeEmail.trim().toLowerCase() });
+
+    const row = result.data?.real_estate_user?.[0];
+    if (!row?.nhost_user_id) return null;
+    return {
+      userId: row.nhost_user_id,
+      displayName: row.display_name?.trim() || row.email?.trim() || "User",
+    };
+  }
+
+  return null;
+}
+
+export function computeGroupStatus(members: TenancyGroupMemberRow[]): GroupStatus {
+  const accepted = members.filter((m) => m.status === "accepted");
+  const pendingInvites = members.filter((m) => m.status === "invited");
+
+  if (accepted.length >= MIN_ACTIVE_MEMBERS && pendingInvites.length === 0) {
+    return "active";
+  }
+  return "pending";
+}
+
+export async function recalculateGroupStatus(groupId: string): Promise<GroupStatus | null> {
+  const group = await getGroupById(groupId);
+  if (!group || group.status === "disbanded" || group.status === "locked") {
+    return group?.status ?? null;
+  }
+
+  const nextStatus = computeGroupStatus(group.members);
+  if (nextStatus === group.status) {
+    return group.status;
+  }
+
+  const result = await hasuraQuery<{
+    update_real_estate_tenancy_groups_by_pk?: { status: GroupStatus };
+  }>(UPDATE_GROUP, {
+    id: groupId,
+    updates: { status: nextStatus, updated_at: new Date().toISOString() },
+  });
+
+  if (result.errors?.length) {
+    throw new Error(result.errors[0]?.message ?? "Failed to update group status");
+  }
+
+  return result.data?.update_real_estate_tenancy_groups_by_pk?.status ?? nextStatus;
+}
+
+export function countOccupiedSlots(members: TenancyGroupMemberRow[]): number {
+  return members.filter((m) => m.status === "accepted" || m.status === "invited").length;
+}
+
+export function findMember(
+  members: TenancyGroupMemberRow[],
+  userId: string
+): TenancyGroupMemberRow | undefined {
+  return members.find((m) => m.user_id === userId);
+}
+
+export function assertOrganiser(group: GroupWithMembers, userId: string): boolean {
+  return group.organiser_id === userId;
+}
+
+export function assertAcceptedMember(group: GroupWithMembers, userId: string): boolean {
+  const member = findMember(group.members, userId);
+  return member?.status === "accepted";
+}
+
+export function assertAnyMember(group: GroupWithMembers, userId: string): boolean {
+  return group.members.some(
+    (m) => m.user_id === userId && (m.status === "accepted" || m.status === "invited")
+  );
+}
+
+export async function createGroupWithOrganiser(input: {
+  name: string;
+  description?: string;
+  budgetMin?: number;
+  budgetMax?: number;
+  organiserId: string;
+}): Promise<GroupWithMembers> {
+  const result = await hasuraQuery<{
+    insert_real_estate_tenancy_groups_one?: GroupWithMembers;
+  }>(CREATE_GROUP, {
+    object: {
+      name: input.name.trim(),
+      description: input.description?.trim() || null,
+      organiser_id: input.organiserId,
+      status: "pending",
+      max_members: 3,
+      budget_min: input.budgetMin ?? null,
+      budget_max: input.budgetMax ?? null,
+      tenancy_group_members: {
+        data: [
+          {
+            user_id: input.organiserId,
+            role: "organiser",
+            status: "accepted",
+            responded_at: new Date().toISOString(),
+          },
+        ],
+      },
+    },
+  });
+
+  if (result.errors?.length || !result.data?.insert_real_estate_tenancy_groups_one) {
+    throw new Error(result.errors?.[0]?.message ?? "Failed to create group");
+  }
+
+  return result.data.insert_real_estate_tenancy_groups_one;
+}
+
+export async function insertGroupMember(input: {
+  groupId: string;
+  userId: string;
+  role?: MemberRole;
+  status?: MemberStatus;
+}): Promise<TenancyGroupMemberRow> {
+  const result = await hasuraQuery<{
+    insert_real_estate_tenancy_group_members_one?: TenancyGroupMemberRow;
+  }>(INSERT_MEMBER, {
+    object: {
+      group_id: input.groupId,
+      user_id: input.userId,
+      role: input.role ?? "member",
+      status: input.status ?? "invited",
+      responded_at: input.status === "accepted" ? new Date().toISOString() : null,
+    },
+  });
+
+  if (result.errors?.length || !result.data?.insert_real_estate_tenancy_group_members_one) {
+    throw new Error(result.errors?.[0]?.message ?? "Failed to add member");
+  }
+
+  return result.data.insert_real_estate_tenancy_group_members_one;
+}
+
+export async function updateGroupMember(
+  memberId: string,
+  updates: Partial<Pick<TenancyGroupMemberRow, "status" | "responded_at">>
+): Promise<TenancyGroupMemberRow> {
+  const result = await hasuraQuery<{
+    update_real_estate_tenancy_group_members_by_pk?: TenancyGroupMemberRow;
+  }>(UPDATE_MEMBER, { id: memberId, updates });
+
+  if (result.errors?.length || !result.data?.update_real_estate_tenancy_group_members_by_pk) {
+    throw new Error(result.errors?.[0]?.message ?? "Failed to update member");
+  }
+
+  return result.data.update_real_estate_tenancy_group_members_by_pk;
+}
+
+export async function updateGroup(
+  groupId: string,
+  updates: Partial<Pick<TenancyGroupRow, "status" | "disbanded_at">>
+): Promise<TenancyGroupRow> {
+  const result = await hasuraQuery<{
+    update_real_estate_tenancy_groups_by_pk?: TenancyGroupRow;
+  }>(UPDATE_GROUP, {
+    id: groupId,
+    updates: { ...updates, updated_at: new Date().toISOString() },
+  });
+
+  if (result.errors?.length || !result.data?.update_real_estate_tenancy_groups_by_pk) {
+    throw new Error(result.errors?.[0]?.message ?? "Failed to update group");
+  }
+
+  return result.data.update_real_estate_tenancy_groups_by_pk;
+}
+
+export async function enrichGroupsWithUsers(
+  groups: GroupWithMembers[]
+): Promise<GroupWithMembers[]> {
+  const userIds = new Set<string>();
+  for (const group of groups) {
+    for (const member of group.members) {
+      userIds.add(member.user_id);
+    }
+  }
+
+  if (userIds.size === 0) return groups;
+
+  const result = await hasuraQuery<{
+    real_estate_user?: Array<{
+      nhost_user_id: string;
+      display_name?: string | null;
+      email?: string | null;
+      photo_url?: string | null;
+    }>;
+  }>(LOOKUP_USERS_BY_IDS, { ids: Array.from(userIds) });
+
+  const byId = new Map(
+    (result.data?.real_estate_user ?? []).map((u) => [
+      u.nhost_user_id,
+      {
+        userId: u.nhost_user_id,
+        displayName: u.display_name?.trim() || u.email?.trim() || "User",
+        email: u.email,
+        avatarUrl: u.photo_url,
+      },
+    ])
+  );
+
+  return groups.map((group) => ({
+    ...group,
+    members: group.members.map((member) => ({
+      ...member,
+      user: byId.get(member.user_id) ?? {
+        userId: member.user_id,
+        displayName: "User",
+      },
+    })),
+  }));
+}
+
+export function toClientGroup(group: GroupWithMembers) {
+  return {
+    id: group.id,
+    name: group.name,
+    description: group.description ?? null,
+    organiserId: group.organiser_id,
+    status: group.status,
+    maxMembers: group.max_members,
+    budgetMin: group.budget_min ?? null,
+    budgetMax: group.budget_max ?? null,
+    createdAt: group.created_at,
+    updatedAt: group.updated_at,
+    disbandedAt: group.disbanded_at ?? null,
+    members: group.members.map((m) => ({
+      id: m.id,
+      groupId: m.group_id,
+      userId: m.user_id,
+      role: m.role,
+      status: m.status,
+      invitedAt: m.invited_at,
+      respondedAt: m.responded_at ?? null,
+      user: m.user ?? null,
+    })),
+    acceptedCount: group.members.filter((m) => m.status === "accepted").length,
+    pendingInviteCount: group.members.filter((m) => m.status === "invited").length,
+  };
+}

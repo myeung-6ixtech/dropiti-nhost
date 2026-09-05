@@ -89,6 +89,84 @@ const UNREAD_COUNT = `
   }
 `;
 
+const GET_NOTIFICATION_TYPE = `
+  query GetNotificationType($typeKey: String!) {
+    real_estate_notification_type(
+      where: { type_key: { _eq: $typeKey }, is_active: { _eq: true } }
+      limit: 1
+    ) {
+      id
+      type_key
+      name
+      template
+    }
+  }
+`;
+
+const CREATE_NOTIFICATION = `
+  mutation CreateNotification($notification: real_estate_notification_insert_input!) {
+    insert_real_estate_notification_one(object: $notification) {
+      id
+    }
+  }
+`;
+
+export interface CreateNotificationInput {
+  typeKey: string;
+  recipientUserId: string;
+  senderUserId?: string;
+  data?: Record<string, unknown>;
+  priority?: "low" | "normal" | "high" | "urgent";
+}
+
+function renderTemplate(template: string, data: Record<string, unknown>): string {
+  let message = template;
+  for (const [key, value] of Object.entries(data)) {
+    message = message.replace(new RegExp(`\\{\\{${key}\\}\\}`, "g"), String(value ?? ""));
+  }
+  return message;
+}
+
+export async function createNotification(input: CreateNotificationInput): Promise<string | null> {
+  const typeResult = await hasuraQuery<{
+    real_estate_notification_type?: Array<{ id: number; name: string; template: string }>;
+  }>(GET_NOTIFICATION_TYPE, { typeKey: input.typeKey });
+
+  const typeRow = typeResult.data?.real_estate_notification_type?.[0];
+  if (!typeRow) {
+    console.warn(`[notifications] type not found: ${input.typeKey}`);
+    return null;
+  }
+
+  const data = input.data ?? {};
+  const title = renderTemplate(typeRow.name, data);
+  const message = renderTemplate(typeRow.template, data);
+
+  const result = await hasuraQuery<{ insert_real_estate_notification_one?: { id: string } }>(
+    CREATE_NOTIFICATION,
+    {
+      notification: {
+        type_id: typeRow.id,
+        recipient_user_id: input.recipientUserId,
+        sender_user_id: input.senderUserId ?? null,
+        title,
+        message,
+        data,
+        priority: input.priority ?? "normal",
+        is_read: false,
+        is_archived: false,
+      },
+    }
+  );
+
+  if (result.errors?.length) {
+    console.error("[notifications] create failed:", result.errors[0]?.message);
+    return null;
+  }
+
+  return result.data?.insert_real_estate_notification_one?.id ?? null;
+}
+
 export async function getUserNotifications(userId: string, filters: NotificationFilters) {
   const where: Record<string, unknown> = {
     recipient_user_id: { _eq: userId },
