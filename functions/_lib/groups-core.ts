@@ -76,22 +76,43 @@ const GET_GROUP = `
   }
 `;
 
-const GET_GROUPS_FOR_USER = `
-  query GetGroupsForUser($userId: String!) {
+const GET_GROUPS_BY_ORGANISER = `
+  query GetGroupsByOrganiser($userId: String!) {
     real_estate_tenancy_groups(
-      where: {
-        _or: [
-          { organiser_id: { _eq: $userId } }
-          { tenancy_group_members: { user_id: { _eq: $userId } } }
-        ]
-        status: { _neq: "disbanded" }
-      }
+      where: { organiser_id: { _eq: $userId }, status: { _neq: "disbanded" } }
       order_by: { updated_at: desc }
     ) {
       ${GROUP_FIELDS}
-      members: tenancy_group_members(order_by: { invited_at: asc }) {
-        ${MEMBER_FIELDS}
-      }
+    }
+  }
+`;
+
+const GET_MEMBER_GROUP_IDS = `
+  query GetMemberGroupIds($userId: String!) {
+    real_estate_tenancy_group_members(where: { user_id: { _eq: $userId } }) {
+      group_id
+    }
+  }
+`;
+
+const GET_GROUPS_BY_IDS = `
+  query GetGroupsByIds($ids: [uuid!]!) {
+    real_estate_tenancy_groups(
+      where: { id: { _in: $ids }, status: { _neq: "disbanded" } }
+      order_by: { updated_at: desc }
+    ) {
+      ${GROUP_FIELDS}
+    }
+  }
+`;
+
+const GET_MEMBERS_FOR_GROUPS = `
+  query GetMembersForGroups($groupIds: [uuid!]!) {
+    real_estate_tenancy_group_members(
+      where: { group_id: { _in: $groupIds } }
+      order_by: { invited_at: asc }
+    ) {
+      ${MEMBER_FIELDS}
     }
   }
 `;
@@ -196,6 +217,32 @@ const UPDATE_GROUP = `
 
 const MIN_ACTIVE_MEMBERS = 2;
 
+function extractMembers(
+  row: TenancyGroupRow & {
+    members?: TenancyGroupMemberRow[];
+    tenancy_group_members?: TenancyGroupMemberRow[];
+  }
+): TenancyGroupMemberRow[] {
+  return row.members ?? row.tenancy_group_members ?? [];
+}
+
+function attachMembersToGroups(
+  groups: TenancyGroupRow[],
+  members: TenancyGroupMemberRow[]
+): GroupWithMembers[] {
+  const membersByGroup = new Map<string, TenancyGroupMemberRow[]>();
+  for (const member of members) {
+    const existing = membersByGroup.get(member.group_id) ?? [];
+    existing.push(member);
+    membersByGroup.set(member.group_id, existing);
+  }
+
+  return groups.map((group) => ({
+    ...group,
+    members: membersByGroup.get(group.id) ?? [],
+  }));
+}
+
 export async function getGroupById(groupId: string): Promise<GroupWithMembers | null> {
   const result = await hasuraQuery<{
     real_estate_tenancy_groups_by_pk?: TenancyGroupRow & {
@@ -210,25 +257,89 @@ export async function getGroupById(groupId: string): Promise<GroupWithMembers | 
   const row = result.data?.real_estate_tenancy_groups_by_pk;
   if (!row) return null;
 
+  let members = extractMembers(row);
+
+  if (members.length === 0) {
+    const membersResult = await hasuraQuery<{
+      real_estate_tenancy_group_members?: TenancyGroupMemberRow[];
+    }>(GET_MEMBERS_FOR_GROUPS, { groupIds: [groupId] });
+
+    if (membersResult.errors?.length) {
+      throw new Error(membersResult.errors[0]?.message ?? "Failed to fetch group members");
+    }
+
+    members = membersResult.data?.real_estate_tenancy_group_members ?? [];
+  }
+
   return {
     ...row,
-    members: row.members ?? [],
+    members,
   };
 }
 
 export async function getGroupsForUser(userId: string): Promise<GroupWithMembers[]> {
-  const result = await hasuraQuery<{
-    real_estate_tenancy_groups?: Array<TenancyGroupRow & { members?: TenancyGroupMemberRow[] }>;
-  }>(GET_GROUPS_FOR_USER, { userId });
+  const groupMap = new Map<string, TenancyGroupRow>();
 
-  if (result.errors?.length) {
-    throw new Error(result.errors[0]?.message ?? "Failed to fetch groups");
+  const organiserResult = await hasuraQuery<{
+    real_estate_tenancy_groups?: TenancyGroupRow[];
+  }>(GET_GROUPS_BY_ORGANISER, { userId });
+
+  if (organiserResult.errors?.length) {
+    throw new Error(organiserResult.errors[0]?.message ?? "Failed to fetch organiser groups");
   }
 
-  return (result.data?.real_estate_tenancy_groups ?? []).map((g) => ({
-    ...g,
-    members: g.members ?? [],
-  }));
+  for (const group of organiserResult.data?.real_estate_tenancy_groups ?? []) {
+    groupMap.set(group.id, group);
+  }
+
+  const memberIdsResult = await hasuraQuery<{
+    real_estate_tenancy_group_members?: Array<{ group_id: string }>;
+  }>(GET_MEMBER_GROUP_IDS, { userId });
+
+  if (memberIdsResult.errors?.length) {
+    throw new Error(memberIdsResult.errors[0]?.message ?? "Failed to fetch member groups");
+  }
+
+  const memberGroupIds = [
+    ...new Set(
+      (memberIdsResult.data?.real_estate_tenancy_group_members ?? []).map((m) => m.group_id)
+    ),
+  ].filter((id) => !groupMap.has(id));
+
+  if (memberGroupIds.length > 0) {
+    const memberGroupsResult = await hasuraQuery<{
+      real_estate_tenancy_groups?: TenancyGroupRow[];
+    }>(GET_GROUPS_BY_IDS, { ids: memberGroupIds });
+
+    if (memberGroupsResult.errors?.length) {
+      throw new Error(memberGroupsResult.errors[0]?.message ?? "Failed to fetch member groups");
+    }
+
+    for (const group of memberGroupsResult.data?.real_estate_tenancy_groups ?? []) {
+      groupMap.set(group.id, group);
+    }
+  }
+
+  const groups = Array.from(groupMap.values()).sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+  );
+
+  if (groups.length === 0) {
+    return [];
+  }
+
+  const membersResult = await hasuraQuery<{
+    real_estate_tenancy_group_members?: TenancyGroupMemberRow[];
+  }>(GET_MEMBERS_FOR_GROUPS, { groupIds: groups.map((g) => g.id) });
+
+  if (membersResult.errors?.length) {
+    throw new Error(membersResult.errors[0]?.message ?? "Failed to fetch group members");
+  }
+
+  return attachMembersToGroups(
+    groups,
+    membersResult.data?.real_estate_tenancy_group_members ?? []
+  );
 }
 
 export async function getActiveMembership(userId: string) {
@@ -402,7 +513,14 @@ export async function createGroupWithOrganiser(input: {
     throw new Error(result.errors?.[0]?.message ?? "Failed to create group");
   }
 
-  return result.data.insert_real_estate_tenancy_groups_one;
+  const inserted = result.data.insert_real_estate_tenancy_groups_one;
+  return {
+    ...inserted,
+    members:
+      inserted.members ??
+      (inserted as { tenancy_group_members?: TenancyGroupMemberRow[] }).tenancy_group_members ??
+      [],
+  };
 }
 
 export async function insertGroupMember(input: {
@@ -498,7 +616,7 @@ export async function enrichGroupsWithUsers(
 
   return groups.map((group) => ({
     ...group,
-    members: group.members.map((member) => ({
+    members: (group.members ?? []).map((member) => ({
       ...member,
       user: byId.get(member.user_id) ?? {
         userId: member.user_id,
@@ -509,6 +627,7 @@ export async function enrichGroupsWithUsers(
 }
 
 export function toClientGroup(group: GroupWithMembers) {
+  const members = group.members ?? [];
   return {
     id: group.id,
     name: group.name,
@@ -521,7 +640,7 @@ export function toClientGroup(group: GroupWithMembers) {
     createdAt: group.created_at,
     updatedAt: group.updated_at,
     disbandedAt: group.disbanded_at ?? null,
-    members: group.members.map((m) => ({
+    members: members.map((m) => ({
       id: m.id,
       groupId: m.group_id,
       userId: m.user_id,
@@ -531,7 +650,7 @@ export function toClientGroup(group: GroupWithMembers) {
       respondedAt: m.responded_at ?? null,
       user: m.user ?? null,
     })),
-    acceptedCount: group.members.filter((m) => m.status === "accepted").length,
-    pendingInviteCount: group.members.filter((m) => m.status === "invited").length,
+    acceptedCount: members.filter((m) => m.status === "accepted").length,
+    pendingInviteCount: members.filter((m) => m.status === "invited").length,
   };
 }
