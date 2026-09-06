@@ -102,17 +102,26 @@ const CHECK_ACTIVE_MEMBERSHIP = `
       where: {
         user_id: { _eq: $userId }
         status: { _eq: "accepted" }
-        group: { status: { _in: ["pending", "active", "locked"] } }
+      }
+    ) {
+      id
+      group_id
+    }
+  }
+`;
+
+const GET_ACTIVE_GROUPS_BY_IDS = `
+  query GetActiveGroupsByIds($ids: [uuid!]!) {
+    real_estate_tenancy_groups(
+      where: {
+        id: { _in: $ids }
+        status: { _in: ["pending", "active", "locked"] }
       }
       limit: 1
     ) {
       id
-      group_id
-      group {
-        id
-        name
-        status
-      }
+      name
+      status
     }
   }
 `;
@@ -223,19 +232,37 @@ export async function getGroupsForUser(userId: string): Promise<GroupWithMembers
 }
 
 export async function getActiveMembership(userId: string) {
-  const result = await hasuraQuery<{
-    real_estate_tenancy_group_members?: Array<{
-      id: string;
-      group_id: string;
-      group?: { id: string; name: string; status: GroupStatus };
-    }>;
+  const membersResult = await hasuraQuery<{
+    real_estate_tenancy_group_members?: Array<{ id: string; group_id: string }>;
   }>(CHECK_ACTIVE_MEMBERSHIP, { userId });
 
-  if (result.errors?.length) {
-    throw new Error(result.errors[0]?.message ?? "Failed to check membership");
+  if (membersResult.errors?.length) {
+    throw new Error(membersResult.errors[0]?.message ?? "Failed to check membership");
   }
 
-  return result.data?.real_estate_tenancy_group_members?.[0] ?? null;
+  const members = membersResult.data?.real_estate_tenancy_group_members ?? [];
+  if (members.length === 0) return null;
+
+  const groupIds = members.map((m) => m.group_id);
+  const groupsResult = await hasuraQuery<{
+    real_estate_tenancy_groups?: Array<{ id: string; name: string; status: GroupStatus }>;
+  }>(GET_ACTIVE_GROUPS_BY_IDS, { ids: groupIds });
+
+  if (groupsResult.errors?.length) {
+    throw new Error(groupsResult.errors[0]?.message ?? "Failed to check membership");
+  }
+
+  const activeGroup = groupsResult.data?.real_estate_tenancy_groups?.[0];
+  if (!activeGroup) return null;
+
+  const member = members.find((m) => m.group_id === activeGroup.id);
+  if (!member) return null;
+
+  return {
+    id: member.id,
+    group_id: activeGroup.id,
+    group: activeGroup,
+  };
 }
 
 export async function resolveInviteeUserId(

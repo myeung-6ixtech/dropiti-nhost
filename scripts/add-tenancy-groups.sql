@@ -96,7 +96,7 @@ ON CONFLICT (type_key) DO NOTHING;
 -- 2. Track: real_estate.tenancy_group_members → GraphQL: real_estate_tenancy_group_members
 -- 3. Relationships:
 --    - tenancy_groups.members → tenancy_group_members (array, group_id)
---    - tenancy_group_members.group → tenancy_groups (object)
+--    - tenancy_group_members.tenancy_group → tenancy_groups (object; Hasura default name)
 -- 4. Permissions (role: user):
 --    - tenancy_groups: select where organiser_id = X-Hasura-User-Id OR member exists
 --    - tenancy_group_members: select/update own row; insert via functions only
