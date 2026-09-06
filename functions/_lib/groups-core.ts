@@ -1,4 +1,10 @@
 import { hasuraQuery } from "./hasura";
+import {
+  displayNameFromUserRow,
+  lookupUserByEmail,
+  lookupUserByNhostId,
+  lookupUsersByNhostIds,
+} from "./real-estate-user-hasura";
 
 export type GroupStatus = "pending" | "active" | "locked" | "disbanded";
 export type MemberRole = "organiser" | "member";
@@ -143,39 +149,6 @@ const GET_ACTIVE_GROUPS_BY_IDS = `
       id
       name
       status
-    }
-  }
-`;
-
-const LOOKUP_USER_BY_EMAIL = `
-  query LookupUserByEmail($email: String!) {
-    real_estate_user(where: { email: { _eq: $email } }, limit: 1) {
-      nhost_user_id
-      display_name
-      email
-      photo_url
-    }
-  }
-`;
-
-const LOOKUP_USER_BY_NHOST_ID = `
-  query LookupUserByNhostId($nhostUserId: uuid!) {
-    real_estate_user(where: { nhost_user_id: { _eq: $nhostUserId } }, limit: 1) {
-      nhost_user_id
-      display_name
-      email
-      photo_url
-    }
-  }
-`;
-
-const LOOKUP_USERS_BY_IDS = `
-  query LookupUsersByIds($ids: [uuid!]!) {
-    real_estate_user(where: { nhost_user_id: { _in: $ids } }) {
-      nhost_user_id
-      display_name
-      email
-      photo_url
     }
   }
 `;
@@ -381,36 +354,20 @@ export async function resolveInviteeUserId(
   inviteeUserId?: string
 ): Promise<{ userId: string; displayName: string } | null> {
   if (inviteeUserId) {
-    const result = await hasuraQuery<{
-      real_estate_user?: Array<{
-        nhost_user_id: string;
-        display_name?: string | null;
-        email?: string | null;
-      }>;
-    }>(LOOKUP_USER_BY_NHOST_ID, { nhostUserId: inviteeUserId });
-
-    const row = result.data?.real_estate_user?.[0];
+    const row = await lookupUserByNhostId(inviteeUserId);
     if (!row?.nhost_user_id) return null;
     return {
       userId: row.nhost_user_id,
-      displayName: row.display_name?.trim() || row.email?.trim() || "User",
+      displayName: displayNameFromUserRow(row),
     };
   }
 
   if (inviteeEmail) {
-    const result = await hasuraQuery<{
-      real_estate_user?: Array<{
-        nhost_user_id: string;
-        display_name?: string | null;
-        email?: string | null;
-      }>;
-    }>(LOOKUP_USER_BY_EMAIL, { email: inviteeEmail.trim().toLowerCase() });
-
-    const row = result.data?.real_estate_user?.[0];
+    const row = await lookupUserByEmail(inviteeEmail);
     if (!row?.nhost_user_id) return null;
     return {
       userId: row.nhost_user_id,
-      displayName: row.display_name?.trim() || row.email?.trim() || "User",
+      displayName: displayNameFromUserRow(row),
     };
   }
 
@@ -593,21 +550,29 @@ export async function enrichGroupsWithUsers(
 
   if (userIds.size === 0) return groups;
 
-  const result = await hasuraQuery<{
-    real_estate_user?: Array<{
-      nhost_user_id: string;
-      display_name?: string | null;
-      email?: string | null;
-      photo_url?: string | null;
-    }>;
-  }>(LOOKUP_USERS_BY_IDS, { ids: Array.from(userIds) });
+  let users: Awaited<ReturnType<typeof lookupUsersByNhostIds>> = [];
+  try {
+    users = await lookupUsersByNhostIds(Array.from(userIds));
+  } catch (error) {
+    console.warn("[groups-core] enrichGroupsWithUsers: user lookup failed", error);
+    return groups.map((group) => ({
+      ...group,
+      members: (group.members ?? []).map((member) => ({
+        ...member,
+        user: {
+          userId: member.user_id,
+          displayName: "User",
+        },
+      })),
+    }));
+  }
 
   const byId = new Map(
-    (result.data?.real_estate_user ?? []).map((u) => [
+    users.map((u) => [
       u.nhost_user_id,
       {
         userId: u.nhost_user_id,
-        displayName: u.display_name?.trim() || u.email?.trim() || "User",
+        displayName: displayNameFromUserRow(u),
         email: u.email,
         avatarUrl: u.photo_url,
       },

@@ -1,10 +1,10 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { requireAuth, getUserId } from "../../_lib/auth";
-import { hasuraQuery } from "../../_lib/hasura";
-import { validateBody } from "../../_lib/validate";
-import { ok, fail } from "../../_lib/respond";
 import { createNotification } from "../../_lib/notifications";
+import {
+  lookupUserByNhostId,
+} from "../../_lib/real-estate-user-hasura";
 import {
   assertOrganiser,
   countOccupiedSlots,
@@ -16,6 +16,9 @@ import {
   resolveInviteeUserId,
   toClientGroup,
 } from "../../_lib/groups-core";
+import { hasuraQuery } from "../../_lib/hasura";
+import { validateBody } from "../../_lib/validate";
+import { ok, fail } from "../../_lib/respond";
 
 const InviteMemberSchema = z
   .object({
@@ -26,15 +29,6 @@ const InviteMemberSchema = z
   .refine((data) => data.inviteeEmail || data.inviteeUserId, {
     message: "inviteeEmail or inviteeUserId is required",
   });
-
-const LOOKUP_ORGANISER = `
-  query LookupOrganiser($nhostUserId: uuid!) {
-    real_estate_user(where: { nhost_user_id: { _eq: $nhostUserId } }, limit: 1) {
-      display_name
-      email
-    }
-  }
-`;
 
 export default async function inviteMember(req: Request, res: Response): Promise<void> {
   try {
@@ -114,13 +108,11 @@ export default async function inviteMember(req: Request, res: Response): Promise
 
     await recalculateGroupStatus(body.groupId);
 
-    const organiserResult = await hasuraQuery<{
-      real_estate_user?: Array<{ display_name?: string | null; email?: string | null }>;
-    }>(LOOKUP_ORGANISER, { nhostUserId: userId });
-
-    const organiserRow = organiserResult.data?.real_estate_user?.[0];
+    const organiserRow = await lookupUserByNhostId(userId);
     const senderName =
-      organiserRow?.display_name?.trim() || organiserRow?.email?.trim() || "Someone";
+      organiserRow?.display_name?.trim() ||
+      organiserRow?.email?.trim() ||
+      "Someone";
 
     await createNotification({
       typeKey: "group_invitation",

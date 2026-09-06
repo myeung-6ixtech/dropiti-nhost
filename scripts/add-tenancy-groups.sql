@@ -101,3 +101,10 @@ ON CONFLICT (type_key) DO NOTHING;
 --    - tenancy_groups: select where organiser_id = X-Hasura-User-Id OR member exists
 --    - tenancy_group_members: select/update own row; insert via functions only
 --    Functions use admin secret — no client GraphQL writes required for v1.
+--
+-- 5. User profile table (required for group member enrichment):
+--    Postgres table: real_estate.user (NOT real_estate_user)
+--    Track in Hasura with custom GraphQL name: user OR real_estate_user
+--    Functions try both GraphQL roots via _lib/real-estate-user-hasura.ts
+--    If you see: relation "real_estate.real_estate_user" does not exist
+--    → re-track real_estate.user in Hasura Console (Data → real_estate → user)
