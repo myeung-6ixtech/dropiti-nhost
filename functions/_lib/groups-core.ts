@@ -349,26 +349,34 @@ export async function getActiveMembership(userId: string) {
   };
 }
 
+export const INVITEE_NOT_ON_PLATFORM =
+  "No Dropiti account found with this email address. Ask them to sign up first.";
+
 export async function resolveInviteeUserId(
   inviteeEmail?: string,
   inviteeUserId?: string
 ): Promise<{ userId: string; displayName: string } | null> {
-  if (inviteeUserId) {
-    const row = await lookupUserByNhostId(inviteeUserId);
-    if (!row?.nhost_user_id) return null;
-    return {
-      userId: row.nhost_user_id,
-      displayName: displayNameFromUserRow(row),
-    };
-  }
+  try {
+    if (inviteeUserId) {
+      const row = await lookupUserByNhostId(inviteeUserId);
+      if (!row?.nhost_user_id) return null;
+      return {
+        userId: row.nhost_user_id,
+        displayName: displayNameFromUserRow(row),
+      };
+    }
 
-  if (inviteeEmail) {
-    const row = await lookupUserByEmail(inviteeEmail);
-    if (!row?.nhost_user_id) return null;
-    return {
-      userId: row.nhost_user_id,
-      displayName: displayNameFromUserRow(row),
-    };
+    if (inviteeEmail) {
+      const row = await lookupUserByEmail(inviteeEmail);
+      if (!row?.nhost_user_id) return null;
+      return {
+        userId: row.nhost_user_id,
+        displayName: displayNameFromUserRow(row),
+      };
+    }
+  } catch (error) {
+    console.warn("[groups-core] resolveInviteeUserId lookup failed:", error);
+    return null;
   }
 
   return null;
@@ -523,6 +531,24 @@ export async function updateGroupMember(
 export async function updateGroup(
   groupId: string,
   updates: Partial<Pick<TenancyGroupRow, "status" | "disbanded_at">>
+): Promise<TenancyGroupRow> {
+  const result = await hasuraQuery<{
+    update_real_estate_tenancy_groups_by_pk?: TenancyGroupRow;
+  }>(UPDATE_GROUP, {
+    id: groupId,
+    updates: { ...updates, updated_at: new Date().toISOString() },
+  });
+
+  if (result.errors?.length || !result.data?.update_real_estate_tenancy_groups_by_pk) {
+    throw new Error(result.errors?.[0]?.message ?? "Failed to update group");
+  }
+
+  return result.data.update_real_estate_tenancy_groups_by_pk;
+}
+
+export async function updateGroupDetails(
+  groupId: string,
+  updates: Partial<Pick<TenancyGroupRow, "name" | "description" | "budget_min" | "budget_max">>
 ): Promise<TenancyGroupRow> {
   const result = await hasuraQuery<{
     update_real_estate_tenancy_groups_by_pk?: TenancyGroupRow;

@@ -12,6 +12,7 @@ import {
   findMember,
   getGroupById,
   insertGroupMember,
+  INVITEE_NOT_ON_PLATFORM,
   recalculateGroupStatus,
   resolveInviteeUserId,
   toClientGroup,
@@ -72,7 +73,7 @@ export default async function inviteMember(req: Request, res: Response): Promise
 
     const invitee = await resolveInviteeUserId(body.inviteeEmail, body.inviteeUserId);
     if (!invitee) {
-      fail(res, "User not found", 404);
+      fail(res, INVITEE_NOT_ON_PLATFORM, 404);
       return;
     }
 
@@ -138,6 +139,13 @@ export default async function inviteMember(req: Request, res: Response): Promise
     const message = error instanceof Error ? error.message : "Internal server error";
     if (message.includes("active group membership")) {
       fail(res, "This user is already in another active group", 409);
+      return;
+    }
+    if (
+      message.toLowerCase().includes("lookup user") ||
+      message.toLowerCase().includes("real_estate_user")
+    ) {
+      fail(res, INVITEE_NOT_ON_PLATFORM, 404);
       return;
     }
     fail(res, message, 500);
