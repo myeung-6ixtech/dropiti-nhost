@@ -1,11 +1,18 @@
 import { hasuraQuery } from "./hasura";
 import { formatPropertyLocation } from "./format-address";
 import { toClientPaymentFrequency } from "./payment-frequency";
+import { normalizeLifestyleTags } from "./group-metadata";
+import {
+  enrichGroupsWithUsers,
+  getGroupById,
+  type GroupWithMembers,
+} from "./groups-core";
 
 type RawOfferRow = Record<string, unknown> & {
   id?: number | string;
   offer_key?: string;
   property_uuid?: string;
+  group_id?: string | null;
   initiator_user_id?: string;
   recipient_user_id?: string;
   proposing_rent_price?: number | null;
@@ -157,15 +164,37 @@ function mapOfferProperty(property: PropertyRow | undefined) {
   };
 }
 
+function toOfferGroupContext(group: GroupWithMembers) {
+  const acceptedMembers = (group.members ?? []).filter((m) => m.status === "accepted");
+  return {
+    id: group.id,
+    name: group.name,
+    status: group.status,
+    organiserId: group.organiser_id,
+    intendedLeaseDuration: group.intended_lease_duration ?? null,
+    moveInDate: group.move_in_date ?? null,
+    propertyUse: group.property_use ?? null,
+    lifestyleTags: normalizeLifestyleTags(group.lifestyle_tags),
+    members: acceptedMembers.map((m) => ({
+      userId: m.user_id,
+      displayName: m.user?.displayName ?? "User",
+      avatarUrl: m.user?.avatarUrl ?? null,
+      role: m.role,
+    })),
+  };
+}
+
 function transformOfferRow(
   offer: RawOfferRow,
   usersByKey: Map<string, RealEstateUserRow>,
   authById: Map<string, AuthUserRow>,
-  propertiesByUuid: Map<string, PropertyRow>
+  propertiesByUuid: Map<string, PropertyRow>,
+  groupsById: Map<string, ReturnType<typeof toOfferGroupContext>>
 ): Record<string, unknown> {
   const initiatorUserId = String(offer.initiator_user_id ?? "");
   const recipientUserId = String(offer.recipient_user_id ?? "");
   const propertyUuid = String(offer.property_uuid ?? "");
+  const groupId = offer.group_id ? String(offer.group_id) : null;
 
   const resolveUser = (userId: string) =>
     mergeOfferUser(
@@ -196,6 +225,7 @@ function transformOfferRow(
     id: String(offer.id ?? ""),
     offerKey: String(offer.offer_key ?? ""),
     propertyUuid,
+    groupId,
     initiatorUserId,
     recipientUserId,
     proposingRentPrice: Number(offer.proposing_rent_price ?? 0),
@@ -226,6 +256,7 @@ function transformOfferRow(
     initiator: resolveUser(initiatorUserId),
     recipient: resolveUser(recipientUserId),
     property: mapOfferProperty(propertiesByUuid.get(propertyUuid)),
+    group: groupId ? groupsById.get(groupId) ?? null : null,
   };
 }
 
@@ -237,16 +268,19 @@ export async function enrichOffersWithDetails(
 
   const userIds = new Set<string>();
   const propertyUuids = new Set<string>();
+  const groupIds = new Set<string>();
 
   for (const offer of offers) {
     if (offer.initiator_user_id) userIds.add(String(offer.initiator_user_id));
     if (offer.recipient_user_id) userIds.add(String(offer.recipient_user_id));
     if (offer.property_uuid) propertyUuids.add(String(offer.property_uuid));
+    if (offer.group_id) groupIds.add(String(offer.group_id));
   }
 
   const usersByKey = new Map<string, RealEstateUserRow>();
   const authById = new Map<string, AuthUserRow>();
   const propertiesByUuid = new Map<string, PropertyRow>();
+  const groupsById = new Map<string, ReturnType<typeof toOfferGroupContext>>();
 
   const fetches: Promise<void>[] = [];
 
@@ -290,9 +324,26 @@ export async function enrichOffersWithDetails(
     );
   }
 
+  if (groupIds.size > 0) {
+    fetches.push(
+      (async () => {
+        const loadedGroups = await Promise.all(
+          [...groupIds].map((groupId) => getGroupById(groupId))
+        );
+        const validGroups = loadedGroups.filter(
+          (group): group is GroupWithMembers => group != null
+        );
+        const enrichedGroups = await enrichGroupsWithUsers(validGroups);
+        for (const group of enrichedGroups) {
+          groupsById.set(group.id, toOfferGroupContext(group));
+        }
+      })()
+    );
+  }
+
   await Promise.all(fetches);
 
   return offers.map((offer) =>
-    transformOfferRow(offer, usersByKey, authById, propertiesByUuid)
+    transformOfferRow(offer, usersByKey, authById, propertiesByUuid, groupsById)
   );
 }

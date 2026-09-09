@@ -10,7 +10,7 @@ import {
 import { ok, fail } from "../../_lib/respond";
 
 const RejectSchema = z.object({
-  offerId: z.number().int().positive(),
+  offerId: z.coerce.number().int().positive(),
   reason: z.string().optional(),
 });
 

@@ -10,7 +10,7 @@ import {
 import { ok, fail } from "../../_lib/respond";
 
 const AcceptSchema = z.object({
-  offerId: z.number().int().positive(),
+  offerId: z.coerce.number().int().positive(),
 });
 
 export default async function acceptOffer(req: Request, res: Response): Promise<void> {

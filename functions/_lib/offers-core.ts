@@ -4,6 +4,7 @@ export type OfferRow = {
   id: number;
   offer_key: string;
   property_uuid: string;
+  group_id?: string | null;
   initiator_user_id: string;
   recipient_user_id: string;
   proposing_rent_price: number;
@@ -37,6 +38,7 @@ export const OFFER_FIELDS = `
   id
   offer_key
   property_uuid
+  group_id
   initiator_user_id
   recipient_user_id
   proposing_rent_price

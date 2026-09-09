@@ -4,6 +4,12 @@ import { requireAuth, getUserId } from "../../_lib/auth";
 import { validateBody } from "../../_lib/validate";
 import { ok, fail } from "../../_lib/respond";
 import {
+  INTENDED_LEASE_DURATIONS,
+  LIFESTYLE_TAGS,
+  PROPERTY_USES,
+  normalizeLifestyleTags,
+} from "../../_lib/group-metadata";
+import {
   createGroupWithOrganiser,
   enrichGroupsWithUsers,
   getActiveMembership,
@@ -15,6 +21,10 @@ const CreateGroupSchema = z.object({
   description: z.string().trim().max(500).optional(),
   budgetMin: z.number().nonnegative().optional(),
   budgetMax: z.number().nonnegative().optional(),
+  intendedLeaseDuration: z.enum(INTENDED_LEASE_DURATIONS),
+  moveInDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  propertyUse: z.enum(PROPERTY_USES),
+  lifestyleTags: z.array(z.enum(LIFESTYLE_TAGS)).max(4).optional(),
 });
 
 export default async function createGroup(req: Request, res: Response): Promise<void> {
@@ -47,6 +57,10 @@ export default async function createGroup(req: Request, res: Response): Promise<
       description: body.description,
       budgetMin: body.budgetMin,
       budgetMax: body.budgetMax,
+      intendedLeaseDuration: body.intendedLeaseDuration,
+      moveInDate: body.moveInDate,
+      propertyUse: body.propertyUse,
+      lifestyleTags: normalizeLifestyleTags(body.lifestyleTags),
       organiserId: userId,
     });
 

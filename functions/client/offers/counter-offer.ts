@@ -11,7 +11,7 @@ import {
 import { ok, fail } from "../../_lib/respond";
 
 const CounterSchema = z.object({
-  offerId: z.number().int().positive(),
+  offerId: z.coerce.number().int().positive(),
   proposingRentPrice: z.number().positive(),
   numLeasingMonths: z.number().int().positive().optional(),
   paymentFrequency: z.string().optional(),

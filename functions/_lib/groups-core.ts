@@ -1,5 +1,11 @@
 import { hasuraQuery } from "./hasura";
 import {
+  normalizeLifestyleTags,
+  type IntendedLeaseDuration,
+  type LifestyleTag,
+  type PropertyUse,
+} from "./group-metadata";
+import {
   displayNameFromUserRow,
   lookupUserByEmail,
   lookupUserByNhostId,
@@ -19,6 +25,10 @@ export type TenancyGroupRow = {
   max_members: number;
   budget_min?: number | null;
   budget_max?: number | null;
+  intended_lease_duration?: IntendedLeaseDuration | null;
+  move_in_date?: string | null;
+  property_use?: PropertyUse | null;
+  lifestyle_tags?: LifestyleTag[] | null;
   created_at: string;
   updated_at: string;
   disbanded_at?: string | null;
@@ -56,6 +66,10 @@ const GROUP_FIELDS = `
   max_members
   budget_min
   budget_max
+  intended_lease_duration
+  move_in_date
+  property_use
+  lifestyle_tags
   created_at
   updated_at
   disbanded_at
@@ -448,6 +462,10 @@ export async function createGroupWithOrganiser(input: {
   description?: string;
   budgetMin?: number;
   budgetMax?: number;
+  intendedLeaseDuration: IntendedLeaseDuration;
+  moveInDate: string;
+  propertyUse: PropertyUse;
+  lifestyleTags?: LifestyleTag[];
   organiserId: string;
 }): Promise<GroupWithMembers> {
   const result = await hasuraQuery<{
@@ -461,6 +479,10 @@ export async function createGroupWithOrganiser(input: {
       max_members: 3,
       budget_min: input.budgetMin ?? null,
       budget_max: input.budgetMax ?? null,
+      intended_lease_duration: input.intendedLeaseDuration,
+      move_in_date: input.moveInDate,
+      property_use: input.propertyUse,
+      lifestyle_tags: normalizeLifestyleTags(input.lifestyleTags),
       tenancy_group_members: {
         data: [
           {
@@ -548,7 +570,19 @@ export async function updateGroup(
 
 export async function updateGroupDetails(
   groupId: string,
-  updates: Partial<Pick<TenancyGroupRow, "name" | "description" | "budget_min" | "budget_max">>
+  updates: Partial<
+    Pick<
+      TenancyGroupRow,
+      | "name"
+      | "description"
+      | "budget_min"
+      | "budget_max"
+      | "intended_lease_duration"
+      | "move_in_date"
+      | "property_use"
+      | "lifestyle_tags"
+    >
+  >
 ): Promise<TenancyGroupRow> {
   const result = await hasuraQuery<{
     update_real_estate_tenancy_groups_by_pk?: TenancyGroupRow;
@@ -628,6 +662,10 @@ export function toClientGroup(group: GroupWithMembers) {
     maxMembers: group.max_members,
     budgetMin: group.budget_min ?? null,
     budgetMax: group.budget_max ?? null,
+    intendedLeaseDuration: group.intended_lease_duration ?? null,
+    moveInDate: group.move_in_date ?? null,
+    propertyUse: group.property_use ?? null,
+    lifestyleTags: normalizeLifestyleTags(group.lifestyle_tags),
     createdAt: group.created_at,
     updatedAt: group.updated_at,
     disbandedAt: group.disbanded_at ?? null,

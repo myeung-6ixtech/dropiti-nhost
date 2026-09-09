@@ -9,7 +9,7 @@ import {
 import { ok, fail } from "../../_lib/respond";
 
 const WithdrawSchema = z.object({
-  offerId: z.number().int().positive(),
+  offerId: z.coerce.number().int().positive(),
 });
 
 export default async function withdrawOffer(req: Request, res: Response): Promise<void> {
